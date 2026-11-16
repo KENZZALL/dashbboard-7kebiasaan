@@ -97,7 +97,6 @@ function SurveyFormContent() {
   const quizResultId = searchParams.get('result_id')
   const quizProfile = searchParams.get('profile')
 
-  // Identitas selalu bersih saat membuka link baru
   const [nama, setNama] = useState('')
   const [kelas, setKelas] = useState('')
   const [noAbsen, setNoAbsen] = useState('')
@@ -112,7 +111,6 @@ function SurveyFormContent() {
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Saat link baru dibuka: bersihkan sisa identitas lintas-tab di localStorage
   useEffect(() => {
     try {
       localStorage.removeItem('kaih_student_name')
@@ -122,7 +120,6 @@ function SurveyFormContent() {
     } catch {}
   }, [])
 
-  // Simpan draft pengisian per-email di sessionStorage selama tab belum ditutup
   useEffect(() => {
     const cleanEmail = email.trim().toLowerCase()
     if (!cleanEmail || !cleanEmail.includes('@')) return
@@ -140,7 +137,6 @@ function SurveyFormContent() {
     } catch {}
   }, [email, nama, kelas, noAbsen, answers])
 
-  // Fungsi ambil soal terbaru langsung dari tabel survey_questions
   const fetchLatestQuestions = useCallback(async () => {
     setLoadingQuestions(true)
     const { data, error } = await supabase
@@ -165,7 +161,6 @@ function SurveyFormContent() {
     setLoadingQuestions(false)
   }, [supabase])
 
-  // Muat soal saat halaman dibuka, saat tab kembali aktif (focus), dan dengarkan perubahan real-time dari Admin
   useEffect(() => {
     fetchLatestQuestions()
 
@@ -191,7 +186,6 @@ function SurveyFormContent() {
     }
   }, [fetchLatestQuestions, supabase])
 
-  // Pulihkan identitas & jawaban saat email dimasukkan kembali selama website belum tertutup
   const handleEmailChangeAndRestore = async (rawEmail: string) => {
     setEmail(rawEmail)
     const cleanEmail = rawEmail.trim().toLowerCase()
@@ -275,12 +269,9 @@ function SurveyFormContent() {
     setSubmitting(true)
 
     const scores = Array.from({ length: totalQuestions }, (_, idx) => Number(answers[idx]) || 0)
-    const rataRata =
-      totalQuestions > 0
-        ? Number((scores.reduce((a, b) => a + b, 0) / totalQuestions).toFixed(2))
-        : 0
     const cleanEmail = email.trim().toLowerCase()
 
+    // Kolom rata_rata tidak disertakan karena dihitung otomatis oleh Supabase (Generated Column)
     const payload: Record<string, any> = {
       nama: nama.trim(),
       kelas,
@@ -297,7 +288,6 @@ function SurveyFormContent() {
       q9: scores[8] || 0,
       q10: scores[9] || 0,
       answers_json: scores,
-      rata_rata: rataRata,
     }
 
     if (quizResultId) payload.quiz_result_id = quizResultId
