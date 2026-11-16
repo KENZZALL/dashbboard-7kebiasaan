@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import HeroSection from '@/components/public/HeroSection'
+import { createClient } from '@/lib/supabase/client'
 import {
   Search,
   BarChart3,
@@ -12,51 +13,17 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-const GOOGLE_SHEET_API_URL =
-  process.env.NEXT_PUBLIC_GOOGLE_SHEET_API_URL ||
-  'https://script.google.com/macros/s/AKfycbyGCDCIQMCbgqy0l3hAjtuZs_Ed9F6xsj09cU9oxxnG72WizU_Q0sOVobnRtvYjGS5T/exec'
-
 const INDICATOR_DETAILS = [
-  {
-    short: 'Bangun Pagi',
-    full: 'Bangun tidur sebelum pukul 05.30 pagi setiap hari sehingga tidak terlambat sekolah.',
-  },
-  {
-    short: 'Ibadah Tepat',
-    full: 'Menjalankan ibadah sesuai dengan agama/kepercayaan tepat waktu dan khidmat.',
-  },
-  {
-    short: 'Berdoa Harian',
-    full: 'Mengawali dan mengakhiri kegiatan harian (belajar dan makan) dengan berdoa.',
-  },
-  {
-    short: 'Olahraga 3x',
-    full: 'Melakukan aktivitas fisik atau olahraga (berlari, senam, bersepeda) minimal 3 kali seminggu.',
-  },
-  {
-    short: 'Ekskul/Sekolah',
-    full: 'Berpartisipasi aktif dalam kegiatan olahraga di sekolah atau ekstrakurikuler.',
-  },
-  {
-    short: 'Makan Sehat',
-    full: 'Memilih makanan/jajanan sehat yang mengandung buah, sayur, atau protein saat di sekolah dan rumah.',
-  },
-  {
-    short: 'Gemar Membaca',
-    full: 'Meluangkan waktu membaca buku (non-pelajaran/literasi) minimal 15–30 menit setiap hari.',
-  },
-  {
-    short: 'Bantu Ortu',
-    full: 'Membantu pekerjaan rumah tangga (menyapu, mencuci piring, menjaga adik) tanpa diperintah.',
-  },
-  {
-    short: 'Tidur Cepat',
-    full: 'Tidur malam tidak melebihi pukul 21.30/22.00 agar istirahat mencukupi.',
-  },
-  {
-    short: 'Bebas Gadget',
-    full: 'Mematikan atau tidak menggunakan gadget/smartphone saat mendekati jam tidur malam.',
-  },
+  { short: 'Bangun Pagi', full: 'Bangun tidur sebelum pukul 05.30 pagi setiap hari.' },
+  { short: 'Ibadah Tepat', full: 'Menjalankan ibadah sesuai agama/kepercayaan tepat waktu.' },
+  { short: 'Berdoa Harian', full: 'Mengawali dan mengakhiri kegiatan harian dengan berdoa.' },
+  { short: 'Olahraga 3x', full: 'Melakukan aktivitas fisik atau olahraga minimal 3 kali seminggu.' },
+  { short: 'Ekskul/Sekolah', full: 'Berpartisipasi aktif dalam kegiatan olahraga sekolah atau ekstrakurikuler.' },
+  { short: 'Makan Sehat', full: 'Memilih makanan/jajanan sehat yang mengandung buah, sayur, atau protein.' },
+  { short: 'Gemar Membaca', full: 'Meluangkan waktu membaca buku (non-pelajaran/literasi) minimal 15–30 menit setiap hari.' },
+  { short: 'Bantu Ortu', full: 'Membantu pekerjaan rumah tangga di rumah tanpa diperintah.' },
+  { short: 'Tidur Cepat', full: 'Tidur malam tidak melebihi pukul 21.30/22.00.' },
+  { short: 'Bebas Gadget', full: 'Mematikan atau tidak menggunakan gadget/smartphone saat mendekati jam tidur malam.' },
 ]
 
 function DesktopSidebar({ logoUrl }: { logoUrl: string }) {
@@ -116,9 +83,11 @@ function DesktopSidebar({ logoUrl }: { logoUrl: string }) {
 function InteractiveDonutChart({
   completion,
   overallScore,
+  totalResponses,
 }: {
   completion: number
   overallScore: number
+  totalResponses: number
 }) {
   const [showScoreMode, setShowScoreMode] = useState(false)
   const safeCompletion = Math.min(100, Math.max(0, completion))
@@ -126,17 +95,17 @@ function InteractiveDonutChart({
   return (
     <div
       onClick={() => setShowScoreMode(!showScoreMode)}
-      title="Klik untuk mengganti tampilan Persentase / Skor Rata-Rata"
-      className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all select-none group"
+      title="Ketuk untuk mengganti tampilan Persentase / Skor Rata-Rata"
+      className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all select-none group flex flex-col justify-between"
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <div>
           <h3 className="font-bold text-slate-800 text-base sm:text-lg group-hover:text-indigo-600 transition-colors">
             Progress Kebiasaan
           </h3>
           <p className="text-xs text-slate-500 flex items-center gap-1">
             <MousePointerClick size={12} className="text-indigo-500 shrink-0" />
-            <span>Ketuk grafik untuk ubah mode tampilan</span>
+            <span>Ketuk grafik untuk ubah mode</span>
           </p>
         </div>
         <span className="bg-indigo-50 text-indigo-600 text-xs font-bold px-3 py-1 rounded-full shrink-0">
@@ -144,13 +113,13 @@ function InteractiveDonutChart({
         </span>
       </div>
 
-      <div className="flex items-center justify-center py-3 sm:py-4">
-        <div className="relative h-40 w-40 sm:h-44 sm:w-44 transition-transform duration-300 group-hover:scale-105">
+      <div className="flex items-center justify-center py-3">
+        <div className="relative h-40 w-40 transition-transform duration-300 group-hover:scale-105">
           <div className="absolute inset-0 rounded-full bg-slate-100" />
           <div
             className="absolute inset-0 rounded-full transition-all duration-700"
             style={{
-              background: `conic-gradient(#6366f1 0 ${safeCompletion}%, #e2e8f0 ${safeCompletion}% 100%)`,
+              background: `conic-gradient(#4f46e5 0 ${safeCompletion}%, #e2e8f0 ${safeCompletion}% 100%)`,
             }}
           />
           <div className="absolute inset-4 rounded-full bg-white shadow-inner flex items-center justify-center">
@@ -166,14 +135,14 @@ function InteractiveDonutChart({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mt-2">
+      <div className="grid grid-cols-2 gap-2.5 mt-2">
         <div className="bg-slate-50 p-3 rounded-2xl">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Dimensi</p>
-          <p className="font-bold text-slate-800 text-sm sm:text-base mt-1">7 Kebiasaan</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">Total Respon</p>
+          <p className="font-bold text-slate-800 text-sm mt-0.5">{totalResponses} Entri</p>
         </div>
         <div className="bg-indigo-50 p-3 rounded-2xl">
           <p className="text-[10px] uppercase tracking-wide text-indigo-500">Status</p>
-          <p className="font-bold text-indigo-700 text-sm sm:text-base mt-1">Aktif • SMAN 5</p>
+          <p className="font-bold text-indigo-700 text-sm mt-0.5">Aktif • SMAN 5</p>
         </div>
       </div>
     </div>
@@ -181,14 +150,15 @@ function InteractiveDonutChart({
 }
 
 export default function HomePage() {
+  const supabase = createClient()
   const [searchQuery, setSearchQuery] = useState('')
-  const [completion, setCompletion] = useState(0)
-  const [overallScore, setOverallScore] = useState(0)
-  const [barAverages, setBarAverages] = useState<number[]>(Array(10).fill(0))
   const [selectedBarIdx, setSelectedBarIdx] = useState<number>(0)
   const [loadingChart, setLoadingChart] = useState(true)
   const [nexaraLogoUrl, setNexaraLogoUrl] = useState('')
   const [savedStudentEmail, setSavedStudentEmail] = useState<string | null>(null)
+  const [barAverages, setBarAverages] = useState<number[]>(Array(10).fill(0))
+  const [totalResponses, setTotalResponses] = useState(0)
+  const [overallScore, setOverallScore] = useState(0)
 
   useEffect(() => {
     const email = localStorage.getItem('kaih_student_email')
@@ -196,94 +166,77 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
-    async function fetchStats() {
-      try {
-        const res = await fetch(GOOGLE_SHEET_API_URL)
-        const json = await res.json()
-        if (json.status === 'success' && Array.isArray(json.data)) {
-          const rows = json.data
+    async function fetchSupabaseStats() {
+      const { data, error } = await supabase
+        .from('survey_responses')
+        .select('q1, q2, q3, q4, q5, q6, q7, q8, q9, q10')
 
-          if (rows.length > 0) {
-            const sums = Array(10).fill(0)
-            const validCounts = Array(10).fill(0)
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const sums = Array(10).fill(0)
+        const counts = Array(10).fill(0)
 
-            rows.forEach((r: any) => {
-              if (Array.isArray(r.scores)) {
-                r.scores.forEach((rawVal: any, idx: number) => {
-                  const val = Number(rawVal)
-                  if (!isNaN(val) && val >= 1 && val <= 5) {
-                    sums[idx] += val
-                    validCounts[idx] += 1
-                  }
-                })
-              }
-            })
-
-            const avgs = sums.map((s, idx) =>
-              validCounts[idx] > 0 ? Number((s / validCounts[idx]).toFixed(2)) : 0
-            )
-            setBarAverages(avgs)
-
-            const validAvgs = avgs.filter((a) => a > 0)
-            if (validAvgs.length > 0) {
-              const totalAvg = validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length
-              setOverallScore(totalAvg)
-              setCompletion(Math.min(100, Math.round((totalAvg / 5) * 100)))
+        data.forEach((row: any) => {
+          const vals = [
+            row.q1,
+            row.q2,
+            row.q3,
+            row.q4,
+            row.q5,
+            row.q6,
+            row.q7,
+            row.q8,
+            row.q9,
+            row.q10,
+          ]
+          vals.forEach((v, idx) => {
+            const num = Number(v)
+            if (num >= 1 && num <= 5) {
+              sums[idx] += num
+              counts[idx] += 1
             }
-          }
-        }
-      } catch (err) {
-        console.error('Gagal memuat statistik:', err)
-      } finally {
-        setLoadingChart(false)
+          })
+        })
+
+        const avgs = sums.map((s, i) =>
+          counts[i] > 0 ? Number((s / counts[i]).toFixed(2)) : 0
+        )
+        const validAvgs = avgs.filter((a) => a > 0)
+        const overall =
+          validAvgs.length > 0
+            ? Number((validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length).toFixed(2))
+            : 0
+
+        setBarAverages(avgs)
+        setTotalResponses(data.length)
+        setOverallScore(overall)
       }
+      setLoadingChart(false)
     }
-    fetchStats()
+
+    fetchSupabaseStats()
   }, [])
 
-  const getPredicate = (score: number) => {
-    if (score >= 4.2)
-      return { label: 'Sangat Baik (Membudaya)', color: 'bg-emerald-100 text-emerald-700' }
-    if (score >= 3.4)
-      return { label: 'Baik (Konsisten)', color: 'bg-indigo-100 text-indigo-700' }
-    if (score >= 2.5)
-      return { label: 'Cukup (Perlu Pembiasaan)', color: 'bg-amber-100 text-amber-700' }
-    return { label: 'Perlu Ditingkatkan', color: 'bg-rose-100 text-rose-700' }
-  }
-
+  const completionPct = Math.min(100, Math.round((overallScore / 5) * 100))
   const selectedAvg = barAverages[selectedBarIdx] || 0
   const selectedPct = Math.round((selectedAvg / 5) * 100)
+
+  const getPredicate = (score: number) => {
+    if (score >= 4.2) return { label: 'Sangat Baik (Membudaya)', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+    if (score >= 3.4) return { label: 'Baik (Konsisten)', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' }
+    if (score >= 2.5) return { label: 'Cukup (Perlu Pembiasaan)', color: 'bg-amber-100 text-amber-700 border-amber-200' }
+    return { label: 'Perlu Ditingkatkan', color: 'bg-rose-100 text-rose-700 border-rose-200' }
+  }
+
   const selectedPredicate = getPredicate(selectedAvg)
 
   const habits = [
-    {
-      title: '1. Bangun Pagi',
-      desc: 'Membiasakan diri bangun tepat waktu untuk memulai hari dengan disiplin.',
-    },
-    {
-      title: '2. Beribadah',
-      desc: 'Taat menjalankan ibadah sesuai keyakinan masing-masing.',
-    },
-    {
-      title: '3. Berolahraga',
-      desc: 'Menjaga kesehatan dan kebugaran jasmani secara teratur.',
-    },
-    {
-      title: '4. Makan Sehat & Bergizi',
-      desc: 'Mengonsumsi makanan yang bernutrisi untuk mendukung tumbuh kembang.',
-    },
-    {
-      title: '5. Gemar Membaca',
-      desc: 'Mengembangkan minat baca untuk menambah wawasan dan literasi.',
-    },
-    {
-      title: '6. Membantu Orang Tua',
-      desc: 'Aktif berinteraksi, peduli lingkungan, dan bergotong royong.',
-    },
-    {
-      title: '7. Istirahat Cukup',
-      desc: 'Menjaga pola tidur yang teratur untuk pemulihan energi fisik dan mental.',
-    },
+    { title: '1. Bangun Pagi', desc: 'Membiasakan diri bangun tepat waktu untuk memulai hari dengan disiplin.' },
+    { title: '2. Beribadah', desc: 'Taat menjalankan ibadah sesuai keyakinan masing-masing.' },
+    { title: '3. Berolahraga', desc: 'Menjaga kesehatan dan kebugaran jasmani secara teratur.' },
+    { title: '4. Makan Sehat & Bergizi', desc: 'Mengonsumsi makanan yang bernutrisi untuk mendukung tumbuh kembang.' },
+    { title: '5. Gemar Membaca', desc: 'Mengembangkan minat baca untuk menambah wawasan dan literasi.' },
+    { title: '6. Membantu Orang Tua', desc: 'Aktif berinteraksi, peduli lingkungan, dan bergotong royong.' },
+    { title: '7. Istirahat Cukup', desc: 'Menjaga pola tidur yang teratur untuk pemulihan energi fisik dan mental.' },
   ]
 
   const filteredHabits = habits.filter(
@@ -294,11 +247,9 @@ export default function HomePage() {
 
   return (
     <div className="flex bg-slate-50 min-h-screen p-3 sm:p-4 gap-6 font-sans">
-      {/* Sidebar hanya untuk Desktop; navigasi HP sudah ditangani otomatis oleh layout.tsx */}
       <DesktopSidebar logoUrl={nexaraLogoUrl} />
 
       <main className="flex-1 space-y-5 sm:space-y-6 min-w-0">
-        {/* Header Pencarian & Tombol Aksi */}
         <header className="flex flex-wrap justify-between items-center bg-white p-3.5 sm:p-4 sm:px-6 rounded-2xl shadow-sm border border-slate-100 gap-3">
           <div className="flex items-center gap-2.5 bg-slate-100 px-3.5 py-2 rounded-xl flex-1 sm:flex-initial sm:w-72">
             <Search size={17} className="text-slate-400 shrink-0" />
@@ -346,43 +297,68 @@ export default function HomePage() {
           <HeroSection onLogoLoaded={(url: string) => setNexaraLogoUrl(url)} />
         </Suspense>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
           <InteractiveDonutChart
-            completion={completion}
+            completion={completionPct}
             overallScore={overallScore}
+            totalResponses={totalResponses}
           />
 
-          <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between">
+          <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between space-y-4">
             <div>
-              <h3 className="font-bold text-slate-800 text-base sm:text-lg mb-1.5">Aksi Cepat</h3>
-              <p className="text-xs text-slate-500 mb-4 sm:mb-5">
-                Akses fitur utama 7 KAIH secara langsung.
+              <h3 className="font-bold text-slate-800 text-base sm:text-lg mb-1">
+                Akses Cepat Portal 7 KAIH
+              </h3>
+              <p className="text-xs text-slate-500">
+                Catat kebiasaan baik harianmu atau pantau riwayat pengisian pribadimu.
               </p>
-              <div className="space-y-3">
-                <Link
-                  href="/survey"
-                  className="block w-full p-3.5 sm:p-4 bg-indigo-600 text-white rounded-2xl font-bold text-xs sm:text-sm text-center hover:bg-indigo-700 transition-all shadow-sm"
-                >
-                  Isi Survei Evaluasi Diri →
-                </Link>
-                <Link
-                  href="/statistik"
-                  className="block w-full p-3.5 sm:p-4 bg-blue-50 text-blue-700 rounded-2xl font-bold text-xs sm:text-sm text-center hover:bg-blue-100 transition-all"
-                >
-                  Lihat Statistik Perkembangan Pribadi
-                </Link>
-                <Link
-                  href="/game"
-                  className="block w-full p-3.5 sm:p-4 bg-purple-50 text-purple-700 rounded-2xl font-bold text-xs sm:text-sm text-center hover:bg-purple-100 transition-all"
-                >
-                  Mainkan Kuis Game Rotasi 🎮
-                </Link>
-              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Link
+                href="/survey"
+                className="p-4 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 transition-all"
+              >
+                <p className="text-sm font-extrabold text-indigo-700">Isi Survei Harian →</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  Evaluasi 10 indikator kebiasaan baik skala 1–5.
+                </p>
+              </Link>
+
+              <Link
+                href="/statistik"
+                className="p-4 rounded-2xl bg-purple-50 hover:bg-purple-100 border border-purple-100 transition-all"
+              >
+                <p className="text-sm font-extrabold text-purple-700">Statistik Pribadi →</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  Lihat rata-rata dan unduh rekap harianmu.
+                </p>
+              </Link>
+
+              <Link
+                href="/game"
+                className="p-4 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-100 transition-all"
+              >
+                <p className="text-sm font-extrabold text-amber-700">Main Kuis Interaktif →</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  Temukan profil karakter hebatmu lewat kuis seru.
+                </p>
+              </Link>
+
+              <Link
+                href="/tentang"
+                className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-all"
+              >
+                <p className="text-sm font-extrabold text-slate-800">Tentang & Tim →</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  Profil tim pengembang Nexara SMAN 5 Semarang.
+                </p>
+              </Link>
             </div>
           </div>
         </div>
 
-        {/* Chart Batang Rata-Rata Jawaban Siswa (Horizontal di HP Potret, Vertikal di Desktop) */}
+        {/* Chart Batang Rata-Rata Jawaban Siswa */}
         <div className="bg-white p-5 sm:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-5 sm:space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -406,7 +382,6 @@ export default function HomePage() {
             </div>
           ) : (
             <>
-              {/* TAMPILAN KHUSUS HP POTRET (Batang Horizontal Rapi, Tidak Bertumpuk) */}
               <div className="flex flex-col gap-2.5 sm:hidden border-b border-slate-100 pb-5">
                 {barAverages.map((avg, idx) => {
                   const safeAvg = Math.min(5, Math.max(0, avg))
@@ -425,23 +400,14 @@ export default function HomePage() {
                       }`}
                     >
                       <div className="flex items-center justify-between text-xs mb-1.5">
-                        <span
-                          className={`font-bold ${
-                            isSelected ? 'text-indigo-700' : 'text-slate-700'
-                          }`}
-                        >
+                        <span className={`font-bold ${isSelected ? 'text-indigo-700' : 'text-slate-700'}`}>
                           {idx + 1}. {INDICATOR_DETAILS[idx].short}
                         </span>
-                        <span
-                          className={`font-extrabold ${
-                            isSelected ? 'text-indigo-700' : 'text-slate-600'
-                          }`}
-                        >
+                        <span className={`font-extrabold ${isSelected ? 'text-indigo-700' : 'text-slate-600'}`}>
                           {safeAvg.toFixed(1)}{' '}
                           <span className="text-[10px] font-normal text-slate-400">/ 5.0</span>
                         </span>
                       </div>
-
                       <div className="w-full h-3 bg-slate-200/80 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${
@@ -457,7 +423,6 @@ export default function HomePage() {
                 })}
               </div>
 
-              {/* TAMPILAN KHUSUS TABLET & LAPTOP (10 Batang Vertikal) */}
               <div className="hidden sm:grid sm:grid-cols-10 gap-2 items-end h-56 pt-6 px-1 border-b border-slate-100">
                 {barAverages.map((avg, idx) => {
                   const safeAvg = Math.min(5, Math.max(0, avg))
@@ -504,7 +469,6 @@ export default function HomePage() {
                 })}
               </div>
 
-              {/* Kotak Detail Indikator Terpilih */}
               <div className="bg-slate-50 border border-indigo-100 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all">
                 <div className="space-y-1.5 max-w-2xl">
                   <div className="flex flex-wrap items-center gap-2">
@@ -512,7 +476,7 @@ export default function HomePage() {
                       Indikator #{selectedBarIdx + 1} • {INDICATOR_DETAILS[selectedBarIdx].short}
                     </span>
                     <span
-                      className={`text-xs font-bold px-2.5 py-0.5 rounded-lg ${selectedPredicate.color}`}
+                      className={`text-xs font-bold px-2.5 py-0.5 rounded-lg border ${selectedPredicate.color}`}
                     >
                       {selectedPredicate.label}
                     </span>

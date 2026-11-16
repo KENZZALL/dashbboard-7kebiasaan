@@ -1,338 +1,227 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import Link from 'next/link'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { Download, Search, RefreshCw, Trash2 } from 'lucide-react'
 
-const GOOGLE_SHEET_WEBHOOK_URL =
-  process.env.NEXT_PUBLIC_GOOGLE_SHEET_API_URL ||
-  'https://script.google.com/macros/s/AKfycbyGCDCIQMCbgqy0l3hAjtuZs_Ed9F6xsj09cU9oxxnG72WizU_Q0sOVobnRtvYjGS5T/exec'
-
-type Question = {
-  id: string
-  dimension: string
-  question_text: string
-}
-
-const DEFAULT_SPREADSHEET_QUESTIONS: Question[] = [
-  { id: 'q1', dimension: 'Bangun Pagi', question_text: 'Saya bangun tidur sebelum pukul 05.30 pagi setiap hari sehingga tidak terlambat sekolah' },
-  { id: 'q2', dimension: 'Beribadah', question_text: '3 hari sebelumnya saya menjalankan ibadah sesuai dengan agama/kepercayaan saya tepat waktu dan khidmat' },
-  { id: 'q3', dimension: 'Beribadah', question_text: '3 hari sebelumnya saya mengawali dan mengakhiri kegiatan harian (seperti belajar dan makan) dengan berdoa' },
-  { id: 'q4', dimension: 'Berolahraga', question_text: '3 hari sebelumnya saya melakukan aktivitas fisik atau olahraga (misalnya berlari, senam, bersepeda) minimal 3 kali seminggu' },
-  { id: 'q5', dimension: 'Berolahraga', question_text: '3 hari sebelumnya saya berpartisipasi aktif dalam kegiatan olahraga di sekolah atau ekstrakurikuler' },
-  { id: 'q6', dimension: 'Makan Sehat', question_text: '3 hari sebelumnya saya memilih makanan/jajanan sehat yang mengandung buah, sayur, atau protein saat di sekolah dan rumah' },
-  { id: 'q7', dimension: 'Gemar Membaca', question_text: '3 hari sebelumnya saya meluangkan waktu membaca buku (non-pelajaran/literasi) minimal 15–30 menit setiap hari' },
-  { id: 'q8', dimension: 'Bermasyarakat', question_text: '3 hari sebelumnya saya membantu pekerjaan rumah tangga (misalnya menyapu, mencuci piring, menjaga adik) di rumah tanpa diperintah' },
-  { id: 'q9', dimension: 'Tidur Cepat', question_text: '3 hari sebelumnya saya tidur malam tidak melebihi pukul 21.30/22.00' },
-  { id: 'q10', dimension: 'Tidur Cepat', question_text: '3 hari sebelumnya saya mematikan atau tidak menggunakan gadget/smartphone saat mendekati jam tidur malam' },
+const INDICATOR_HEADERS = [
+  '1. Bangun Pagi',
+  '2. Ibadah Tepat',
+  '3. Berdoa Harian',
+  '4. Olahraga 3x',
+  '5. Ekskul/Sekolah',
+  '6. Makan Sehat',
+  '7. Gemar Membaca',
+  '8. Bantu Ortu',
+  '9. Tidur Cepat',
+  '10. Bebas Gadget',
 ]
 
-function SurveyForm() {
+export default function AdminSurveyDatabasePage() {
   const supabase = createClient()
-  const searchParams = useSearchParams()
-  const profileParam = searchParams.get('profile')
-  const [userProfile, setUserProfile] = useState<string | null>(null)
-
-  const [questions, setQuestions] = useState<Question[]>(DEFAULT_SPREADSHEET_QUESTIONS)
+  const [rows, setRows] = useState<any[]>([])
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // 5 Kolom Identitas Siswa sesuai permintaan: Email, NISN, Nama, Kelas, Absen
-  const [email, setEmail] = useState('')
-  const [nisn, setNisn] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [className, setClassName] = useState('')
-  const [absen, setAbsen] = useState('')
+  const loadResponses = async () => {
+    setLoading(true)
+    const { data } = await supabase
+      .from('survey_responses')
+      .select('*')
+      .order('created_at', { ascending: false })
 
-  const [answers, setAnswers] = useState<Record<string, number>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-
-  useEffect(() => {
-    if (profileParam) setUserProfile(decodeURIComponent(profileParam))
-    const savedEmail = localStorage.getItem('kaih_student_email')
-    if (savedEmail) setEmail(savedEmail)
-  }, [profileParam])
+    if (data) setRows(data)
+    setLoading(false)
+  }
 
   useEffect(() => {
-    async function fetchQuestions() {
-      const { data } = await supabase
-        .from('questions')
-        .select('*')
-        .order('created_at', { ascending: true })
-
-      if (data && data.length === 10) {
-        setQuestions(data)
-      } else {
-        setQuestions(DEFAULT_SPREADSHEET_QUESTIONS)
-      }
-      setLoading(false)
-    }
-    fetchQuestions()
+    loadResponses()
   }, [])
 
-  const handleScoreChange = (qId: string, score: number) => {
-    setAnswers((prev) => ({ ...prev, [qId]: score }))
-  }
+  const filtered = rows.filter(
+    (r) =>
+      r.nama?.toLowerCase().includes(search.toLowerCase()) ||
+      r.kelas?.toLowerCase().includes(search.toLowerCase()) ||
+      r.email?.toLowerCase().includes(search.toLowerCase())
+  )
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleDownloadExcelCsv = () => {
+    if (filtered.length === 0) return
 
-    if (Object.keys(answers).length < questions.length) {
-      alert('Mohon jawab seluruh 10 indikator pertanyaan survey!')
-      return
-    }
+    const headers = [
+      'No',
+      'Waktu Pengisian',
+      'Nama Lengkap',
+      'Kelas',
+      'Email',
+      ...INDICATOR_HEADERS,
+      'Rata-Rata',
+    ]
 
-    setSubmitting(true)
-    localStorage.setItem('kaih_student_email', email.trim().toLowerCase())
+    const csvLines = [
+      headers.join(','),
+      ...filtered.map((r, i) => {
+        const waktu = new Date(r.created_at).toLocaleString('id-ID')
+        return [
+          i + 1,
+          `"${waktu}"`,
+          `"${r.nama}"`,
+          `"${r.kelas}"`,
+          `"${r.email}"`,
+          r.q1,
+          r.q2,
+          r.q3,
+          r.q4,
+          r.q5,
+          r.q6,
+          r.q7,
+          r.q8,
+          r.q9,
+          r.q10,
+          Number(r.rata_rata).toFixed(2),
+        ].join(',')
+      }),
+    ]
 
-    const orderedScores: Record<string, number> = {}
-    questions.forEach((q, idx) => {
-      orderedScores[`q${idx + 1}`] = answers[q.id] || 0
+    const blob = new Blob(['\uFEFF' + csvLines.join('\n')], {
+      type: 'text/csv;charset=utf-8;',
     })
-
-    // 1. Simpan ke Supabase
-    await supabase.from('survey_responses').insert([
-      {
-        full_name: fullName.trim(),
-        student_number: parseInt(absen) || parseInt(nisn) || 0,
-        class_name: className.trim(),
-        answers: { email: email.trim(), nisn: nisn.trim(), absen: absen.trim(), ...answers },
-      },
-    ])
-
-    // 2. Kirim ke Google Spreadsheet & Picu Email Terima Kasih
-    try {
-      await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim(),
-          nisn: nisn.trim(),
-          nama: fullName.trim(),
-          kelas: className.trim(),
-          absen: absen.trim(),
-          user_profile: userProfile || '-',
-          ...orderedScores,
-        }),
-      })
-      setSubmitted(true)
-    } catch (err) {
-      console.error('Gagal mengirim ke Spreadsheet:', err)
-      alert('Gagal mengirim survey ke Spreadsheet. Silakan periksa koneksi internet.')
-    } finally {
-      setSubmitting(false)
-    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Database_Survey_7KAIH_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
-  if (submitted) {
-    return (
-      <div className="max-w-2xl mx-auto my-12 px-4">
-        <div className="bg-white p-8 sm:p-10 rounded-3xl border border-slate-100 shadow-sm text-center space-y-4">
-          <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto font-bold">
-            ✓
-          </div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Survey Berhasil Terkirim!</h1>
-          <p className="text-slate-600 font-medium text-sm leading-relaxed">
-            Terima kasih, <span className="font-bold text-slate-800">{fullName}</span> (Kelas {className} / Absen {absen}). Jawabanmu sudah masuk ke Spreadsheet dan pesan ucapan terima kasih telah dikirim ke <span className="font-bold text-indigo-600">{email}</span>.
-          </p>
-          <div className="flex flex-wrap justify-center gap-3 pt-2">
-            <Link
-              href="/statistik"
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold px-6 py-2.5 rounded-xl text-sm shadow-md"
-            >
-              Lihat Statistik Saya 📊
-            </Link>
-            <button
-              onClick={() => window.location.reload()}
-              className="bg-slate-100 text-slate-700 font-bold px-6 py-2.5 rounded-xl text-sm"
-            >
-              Isi Form Lagi
-            </button>
-          </div>
-        </div>
-      </div>
-    )
+  const handleDelete = async (id: string) => {
+    if (!confirm('Hapus data respon ini dari database?')) return
+    await supabase.from('survey_responses').delete().eq('id', id)
+    loadResponses()
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-      <div className="text-center max-w-2xl mx-auto space-y-2">
-        <span className="text-xs font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200">
-          Yuk Survey! • 7 KAIH
-        </span>
-        <h1 className="text-3xl font-extrabold text-slate-800">
-          Form Evaluasi Diri Siswa
-        </h1>
-        <p className="text-slate-600 text-sm">
-          Lengkapi identitas (Email, NISN, Nama, Kelas, Absen) dan isi penilaian kebiasaan harianmu (Skala 1 – 5).
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* IDENTITAS SISWA: EMAIL, NISN, NAMA, KELAS, ABSEN */}
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
-            Identitas Siswa
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                Email Aktif Siswa
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Tuliskan email pribadi kalian (contoh: nama@gmail.com)"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                NISN
-              </label>
-              <input
-                type="text"
-                required
-                value={nisn}
-                onChange={(e) => setNisn(e.target.value)}
-                placeholder="Contoh: 0081234567"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                Nama Lengkap
-              </label>
-              <input
-                type="text"
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Contoh: Keanu Yusuf Al Ghifari"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                Kelas
-              </label>
-              <input
-                type="text"
-                required
-                value={className}
-                onChange={(e) => setClassName(e.target.value)}
-                placeholder="Contoh: XI-3"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                Nomor Absen
-              </label>
-              <input
-                type="number"
-                required
-                value={absen}
-                onChange={(e) => setAbsen(e.target.value)}
-                placeholder="Contoh: 15"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              />
-            </div>
-          </div>
+    <div className="p-4 sm:p-10 space-y-6 font-sans max-w-6xl">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+            Database Jawaban Survei
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Seluruh hasil pengisian siswa tersimpan langsung di Supabase (skala 1–5) dan siap diunduh ke Excel.
+          </p>
         </div>
 
-        {/* DAFTAR 10 PERTANYAAN */}
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-100 shadow-sm space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-            <h2 className="text-base font-bold text-slate-800">Daftar Pertanyaan Kebiasaan</h2>
-            <span className="text-xs font-bold text-slate-400">
-              {Object.keys(answers).length} / {questions.length} Terisi
-            </span>
-          </div>
-
-          {loading ? (
-            <p className="py-6 text-center text-slate-500 animate-pulse">Memuat pertanyaan...</p>
-          ) : (
-            <div className="space-y-5">
-              {questions.map((q, idx) => (
-                <div key={q.id} className="p-5 rounded-2xl border border-slate-100 bg-slate-50/70 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg">
-                      {q.dimension}
-                    </span>
-                    <span className="text-xs font-bold text-slate-400">#{idx + 1}</span>
-                  </div>
-                  <p className="text-sm font-bold text-slate-800">{q.question_text}</p>
-                  <div className="flex items-center justify-between max-w-lg mx-auto bg-white p-2.5 rounded-xl border border-slate-200">
-                    {[1, 2, 3, 4, 5].map((score) => (
-                      <label
-                        key={score}
-                        className={`flex flex-col items-center cursor-pointer px-3 py-1.5 rounded-lg transition-all ${
-                          answers[q.id] === score
-                            ? 'bg-indigo-600 text-white font-extrabold shadow-sm'
-                            : 'text-slate-700 hover:bg-slate-100 font-semibold'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name={`question_${q.id}`}
-                          value={score}
-                          required
-                          checked={answers[q.id] === score}
-                          onChange={() => handleScoreChange(q.id, score)}
-                          className="sr-only"
-                        />
-                        <span className="text-sm">{score}</span>
-                        <span className="text-[10px] opacity-80">
-                          {score === 1 ? 'Jarang' : score === 3 ? 'Cukup' : score === 5 ? 'Selalu' : ''}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={loadResponses}
+            className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw size={15} />
+            <span>Refresh</span>
+          </button>
 
           <button
-            type="submit"
-            disabled={submitting || loading}
-            className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-500 text-white font-extrabold py-4 rounded-2xl shadow-md text-sm disabled:opacity-50"
+            type="button"
+            onClick={handleDownloadExcelCsv}
+            disabled={filtered.length === 0}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
           >
-            {submitting ? 'Mengirim ke Spreadsheet & Email...' : 'Kirim Survey Sekarang 🚀'}
+            <Download size={15} />
+            <span>Unduh Excel ({filtered.length})</span>
           </button>
         </div>
-      </form>
-    </div>
-  )
-}
+      </div>
 
-export default function SurveySiswaPage() {
-  return (
-    <div className="flex bg-slate-50 min-h-screen p-4 gap-6 font-sans">
-      <aside className="hidden lg:flex w-60 shrink-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm flex-col gap-2">
-        <Link href="/" className="rounded-2xl bg-indigo-50 px-3 py-2.5 text-xs font-bold text-indigo-600">
-          ← Kembali ke Beranda
-        </Link>
-        <Link href="/statistik" className="rounded-2xl px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-          Statistik Pribadi
-        </Link>
-      </aside>
-      <main className="flex-1">
-        <Suspense fallback={<div className="p-8 text-center">Memuat halaman survei...</div>}>
-          <SurveyForm />
-        </Suspense>
-      </main>
+      {/* Pencarian */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-2.5">
+        <Search size={17} className="text-slate-400 shrink-0" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cari nama siswa, kelas (contoh: XI-2), atau email..."
+          className="w-full text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none"
+        />
+      </div>
+
+      {/* Tabel Data */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="p-10 text-center text-sm text-slate-400 animate-pulse">
+            Memuat database jawaban survei...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-10 text-center text-sm text-slate-500">
+            Belum ada data jawaban survei yang tercatat.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[820px]">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold uppercase text-slate-500">
+                  <th className="py-3.5 px-4">Waktu</th>
+                  <th className="py-3.5 px-4">Nama & Kelas</th>
+                  <th className="py-3.5 px-4">Email</th>
+                  <th className="py-3.5 px-4">Skor (Q1–Q10)</th>
+                  <th className="py-3.5 px-4">Rata-Rata</th>
+                  <th className="py-3.5 px-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {filtered.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-50/70">
+                    <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
+                      {new Date(r.created_at).toLocaleString('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <p className="font-bold text-slate-900">{r.nama}</p>
+                      <p className="text-[11px] font-semibold text-blue-600">{r.kelas}</p>
+                    </td>
+                    <td className="py-3.5 px-4 text-slate-600">{r.email}</td>
+                    <td className="py-3.5 px-4">
+                      <div className="flex gap-1">
+                        {[r.q1, r.q2, r.q3, r.q4, r.q5, r.q6, r.q7, r.q8, r.q9, r.q10].map(
+                          (val, idx) => (
+                            <span
+                              key={idx}
+                              title={INDICATOR_HEADERS[idx]}
+                              className="w-6 h-6 rounded-md bg-slate-100 text-slate-800 font-bold flex items-center justify-center text-[11px]"
+                            >
+                              {val}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4 font-black text-indigo-700">
+                      {Number(r.rata_rata).toFixed(2)}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(r.id)}
+                        title="Hapus baris ini"
+                        className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

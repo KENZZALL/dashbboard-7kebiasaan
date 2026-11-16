@@ -13,21 +13,17 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-const GOOGLE_SHEET_API_URL =
-  process.env.NEXT_PUBLIC_GOOGLE_SHEET_API_URL ||
-  'https://script.google.com/macros/s/AKfycbyGCDCIQMCbgqy0l3hAjtuZs_Ed9F6xsj09cU9oxxnG72WizU_Q0sOVobnRtvYjGS5T/exec'
-
 const DEFAULT_QUESTIONS = [
-  '1. Bangun tidur sebelum pukul 05.30 pagi setiap hari sehingga tidak terlambat sekolah.',
-  '2. Menjalankan ibadah sesuai dengan agama/kepercayaan tepat waktu dan khidmat.',
-  '3. Mengawali dan mengakhiri kegiatan harian (belajar dan makan) dengan berdoa.',
-  '4. Melakukan aktivitas fisik atau olahraga (berlari, senam, bersepeda) minimal 3 kali seminggu.',
-  '5. Berpartisipasi aktif dalam kegiatan olahraga di sekolah atau ekstrakurikuler.',
-  '6. Memilih makanan/jajanan sehat yang mengandung buah, sayur, atau protein saat di sekolah dan rumah.',
-  '7. Meluangkan waktu membaca buku (non-pelajaran/literasi) minimal 15–30 menit setiap hari.',
-  '8. Membantu pekerjaan rumah tangga (menyapu, mencuci piring, menjaga adik) tanpa diperintah.',
-  '9. Tidur malam tidak melebihi pukul 21.30/22.00 agar istirahat mencukupi.',
-  '10. Mematikan atau tidak menggunakan gadget/smartphone saat mendekati jam tidur malam.',
+  '1. Saya bangun tidur sebelum pukul 05.30 pagi setiap hari.',
+  '2. Saya menjalankan ibadah sesuai dengan agama/kepercayaan saya tepat waktu.',
+  '3. Saya mengawali dan mengakhiri kegiatan harian (seperti belajar dan makan) dengan berdoa.',
+  '4. Saya melakukan aktivitas fisik atau olahraga (misalnya berlari, senam, bersepeda) minimal 3 kali seminggu.',
+  '5. Saya berpartisipasi aktif dalam kegiatan olahraga di sekolah atau ekstrakurikuler.',
+  '6. Saya memilih makanan/jajanan sehat yang mengandung buah, sayur, atau protein saat di mana saja.',
+  '7. Saya meluangkan waktu membaca buku (non-pelajaran/literasi) minimal 15–30 menit setiap hari.',
+  '8. Saya membantu pekerjaan rumah tangga (misalnya menyapu, mencuci piring, menjaga adik) di rumah tanpa diperintah.',
+  '9. Saya tidur malam tidak melebihi pukul 21.30/22.00.',
+  '10. Saya mematikan atau tidak menggunakan gadget/smartphone saat mendekati jam tidur malam.',
 ]
 
 const SCALE_OPTIONS = [
@@ -52,7 +48,6 @@ export default function SurveyPage() {
   const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
-    // Isi otomatis email & identitas jika siswa pernah mengisi sebelumnya
     const savedEmail = localStorage.getItem('kaih_student_email')
     const savedNama = localStorage.getItem('kaih_student_nama')
     const savedKelas = localStorage.getItem('kaih_student_kelas')
@@ -60,22 +55,17 @@ export default function SurveyPage() {
     if (savedNama) setNama(savedNama)
     if (savedKelas) setKelas(savedKelas)
 
-    // Ambil pertanyaan terbaru dari Admin jika tersedia di Supabase
     async function loadQuestions() {
-      try {
-        const { data } = await supabase
-          .from('survey_questions')
-          .select('*')
-          .order('display_order', { ascending: true })
+      const { data } = await supabase
+        .from('questions')
+        .select('*')
+        .order('created_at', { ascending: true })
 
-        if (data && data.length >= 10) {
-          const mapped = data
-            .slice(0, 10)
-            .map((q: any, i: number) => q.question_text || q.text || DEFAULT_QUESTIONS[i])
-          setQuestions(mapped)
-        }
-      } catch {
-        // Tetap gunakan DEFAULT_QUESTIONS jika tabel tidak ditemukan
+      if (data && data.length >= 10) {
+        const mapped = data
+          .slice(0, 10)
+          .map((q: any, i: number) => `${i + 1}. ${q.question_text}`)
+        setQuestions(mapped)
       }
     }
     loadQuestions()
@@ -110,41 +100,38 @@ export default function SurveyPage() {
 
     setSubmitting(true)
 
-    try {
-      const payload = {
-        action: 'submit',
-        timestamp: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+    const { error: insertError } = await supabase.from('survey_responses').insert([
+      {
         nama: cleanNama,
         kelas: cleanKelas,
         email: cleanEmail,
-        scores: answers,
-      }
+        q1: answers[0],
+        q2: answers[1],
+        q3: answers[2],
+        q4: answers[3],
+        q5: answers[4],
+        q6: answers[5],
+        q7: answers[6],
+        q8: answers[7],
+        q9: answers[8],
+        q10: answers[9],
+      },
+    ])
 
-      await fetch(GOOGLE_SHEET_API_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      })
-
-      // Simpan identitas ke localStorage agar halaman Statistik Pribadi langsung membacanya
-      localStorage.setItem('kaih_student_email', cleanEmail)
-      localStorage.setItem('kaih_student_nama', cleanNama)
-      localStorage.setItem('kaih_student_kelas', cleanKelas)
-
-      setSubmitted(true)
-
-      // Beri jeda 1.5 detik agar Google Apps Script selesai menulis baris sebelum membuka Statistik Pribadi
-      setTimeout(() => {
-        router.push('/statistik')
-      }, 1500)
-    } catch (err) {
-      console.error('Gagal mengirim survei:', err)
-      setErrorMsg('Terjadi gangguan jaringan saat mengirim jawaban. Silakan coba kembali.')
+    if (insertError) {
+      setErrorMsg('Gagal menyimpan jawaban ke database: ' + insertError.message)
       setSubmitting(false)
+      return
     }
+
+    localStorage.setItem('kaih_student_email', cleanEmail)
+    localStorage.setItem('kaih_student_nama', cleanNama)
+    localStorage.setItem('kaih_student_kelas', cleanKelas)
+
+    setSubmitted(true)
+    setTimeout(() => {
+      router.push('/statistik')
+    }, 900)
   }
 
   const filledCount = answers.filter((v) => v >= 1 && v <= 5).length
@@ -157,20 +144,12 @@ export default function SurveyPage() {
             <CheckCircle2 size={34} />
           </div>
           <h2 className="text-xl font-extrabold text-slate-900">
-            Survei Berhasil Terkirim!
+            Survei Berhasil Tersimpan!
           </h2>
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-            Terima kasih, <strong>{nama}</strong>. Mengarahkan otomatis ke halaman{' '}
-            <strong>Statistik Pribadi</strong> untuk menampilkan hasil dan rata-rata pengisianmu...
+            Terima kasih, <strong>{nama}</strong>. Membuka halaman{' '}
+            <strong>Statistik Pribadi</strong> untuk menampilkan hasil dan rata-ratamu...
           </p>
-          <div className="pt-2">
-            <Link
-              href="/statistik"
-              className="inline-block px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold"
-            >
-              Lihat Statistik Pribadi Sekarang →
-            </Link>
-          </div>
         </div>
       </div>
     )
@@ -179,7 +158,6 @@ export default function SurveyPage() {
   return (
     <div className="min-h-screen bg-slate-50 p-3 sm:p-6 lg:p-8 font-sans">
       <div className="max-w-3xl mx-auto space-y-5 sm:space-y-6">
-        {/* Header Survei */}
         <div className="bg-gradient-to-br from-indigo-700 via-indigo-800 to-purple-900 text-white p-6 sm:p-8 rounded-3xl shadow-md space-y-3">
           <div className="flex items-center justify-between">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 text-xs font-bold">
@@ -199,10 +177,9 @@ export default function SurveyPage() {
             Survei Kebiasaan Anak Indonesia Hebat
           </h1>
           <p className="text-xs sm:text-sm text-indigo-100 leading-relaxed">
-            Isilah dengan jujur sesuai aktivitas kalian hari ini. Hasil pengisian akan langsung terekap di halaman Statistik Pribadi.
+            Isilah dengan jujur sesuai aktivitas kalian hari ini. Hasil pengisian otomatis terekap di Statistik Pribadi.
           </p>
 
-          {/* Progress Bar Pengisian */}
           <div className="pt-2 space-y-1.5">
             <div className="flex justify-between text-[11px] font-bold text-indigo-200">
               <span>Progres Pengisian Indikator</span>
@@ -218,7 +195,6 @@ export default function SurveyPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
-          {/* Identitas Siswa */}
           <div className="bg-white p-5 sm:p-7 rounded-3xl shadow-sm border border-slate-100 space-y-4">
             <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
               <ClipboardCheck size={18} className="text-indigo-600" />
@@ -273,7 +249,6 @@ export default function SurveyPage() {
             </div>
           </div>
 
-          {/* Daftar 10 Pertanyaan Skala 1 - 5 */}
           <div className="space-y-4">
             {questions.map((questionText, qIdx) => (
               <div
@@ -327,7 +302,7 @@ export default function SurveyPage() {
             className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-extrabold text-sm sm:text-base shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             <Send size={18} />
-            <span>{submitting ? 'Mengirim ke Spreadsheet...' : 'Kirim Jawaban Survei'}</span>
+            <span>{submitting ? 'Menyimpan Jawaban...' : 'Kirim Jawaban Survei'}</span>
           </button>
         </form>
       </div>
