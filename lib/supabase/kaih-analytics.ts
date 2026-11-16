@@ -106,21 +106,21 @@ export interface DashboardAnalytics {
 }
 
 export function getPredicate(score: number) {
-  if (score >= 4.2) {
+  if (score >= 3.4) {
     return {
       label: 'Membudaya • Tingkat 4',
       badge: 'Master Karakter',
       color: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     }
   }
-  if (score >= 3.4) {
+  if (score >= 2.75) {
     return {
       label: 'Konsisten • Tingkat 3',
       badge: 'Pelajar Teladan',
       color: 'bg-indigo-100 text-indigo-700 border-indigo-200',
     }
   }
-  if (score >= 2.5) {
+  if (score >= 2.0) {
     return {
       label: 'Pembiasaan • Tingkat 2',
       badge: 'Pejuang Rutinitas',
@@ -142,13 +142,13 @@ export function mapToSevenDimensions(barAverages: number[]): DimensionScore[] {
   }
 
   return [
-    { label: 'Bangun Pagi', score: barAverages[0] || 0, target: 4.5 },
-    { label: 'Beribadah', score: avgPair(barAverages[1], barAverages[2]), target: 4.5 },
-    { label: 'Berolahraga', score: avgPair(barAverages[3], barAverages[4]), target: 4.2 },
-    { label: 'Makan Sehat', score: barAverages[5] || 0, target: 4.3 },
-    { label: 'Gemar Belajar', score: barAverages[6] || 0, target: 4.3 },
-    { label: 'Bermasyarakat', score: barAverages[7] || 0, target: 4.4 },
-    { label: 'Tidur Cepat', score: avgPair(barAverages[8], barAverages[9]), target: 4.2 },
+    { label: 'Bangun Pagi', score: barAverages[0] || 0, target: 3.6 },
+    { label: 'Beribadah', score: avgPair(barAverages[1], barAverages[2]), target: 3.6 },
+    { label: 'Berolahraga', score: avgPair(barAverages[3], barAverages[4]), target: 3.4 },
+    { label: 'Makan Sehat', score: barAverages[5] || 0, target: 3.5 },
+    { label: 'Gemar Belajar', score: barAverages[6] || 0, target: 3.5 },
+    { label: 'Bermasyarakat', score: barAverages[7] || 0, target: 3.5 },
+    { label: 'Tidur Cepat', score: avgPair(barAverages[8], barAverages[9]), target: 3.4 },
   ]
 }
 
@@ -158,15 +158,21 @@ export function processSupabaseRows(rows: any[], studentEmail?: string | null): 
   const studentMap = new Map<string, { name: string; kelas: string; entries: number; totalScore: number }>()
 
   rows.forEach((r: any) => {
-    const rawScores = [r.q1, r.q2, r.q3, r.q4, r.q5, r.q6, r.q7, r.q8, r.q9, r.q10]
+    const rawScores =
+      Array.isArray(r.answers_json) && r.answers_json.length > 0
+        ? r.answers_json
+        : [r.q1, r.q2, r.q3, r.q4, r.q5, r.q6, r.q7, r.q8, r.q9, r.q10]
+
     let rowSum = 0
     let rowValid = 0
 
     rawScores.forEach((rawVal: any, idx: number) => {
       const val = Number(rawVal)
-      if (!isNaN(val) && val >= 1 && val <= 5) {
-        sums[idx] += val
-        validCounts[idx] += 1
+      if (!isNaN(val) && val >= 1 && val <= 4) {
+        if (idx < 10) {
+          sums[idx] += val
+          validCounts[idx] += 1
+        }
         rowSum += val
         rowValid += 1
       }
@@ -175,7 +181,7 @@ export function processSupabaseRows(rows: any[], studentEmail?: string | null): 
     const emailKey = String(r.email || r.nama || `siswa-${r.id}`).toLowerCase().trim()
     const displayName = String(r.nama || 'Siswa SMAN 5').trim()
     const displayKelas = String(r.kelas || 'SMAN 5').trim()
-    const rowAvg = rowValid > 0 ? rowSum / rowValid : 0
+    const rowAvg = rowValid > 0 ? rowSum / rowValid : Number(r.rata_rata) || 0
 
     const existing = studentMap.get(emailKey)
     if (existing) {
@@ -201,13 +207,13 @@ export function processSupabaseRows(rows: any[], studentEmail?: string | null): 
       ? Number((validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length).toFixed(2))
       : 0
 
-  const completionPct = Math.min(100, Math.round((overallScore / 5) * 100))
+  const completionPct = Math.min(100, Math.round((overallScore / 4) * 100))
   const sevenDimensions = mapToSevenDimensions(barAverages)
 
   const leaderboard: LeaderboardEntry[] = Array.from(studentMap.values())
     .map((item) => {
       const avg = item.entries > 0 ? item.totalScore / item.entries : 0
-      const xp = Math.round(item.entries * 250 + avg * 120)
+      const xp = Math.round(item.entries * 250 + avg * 150)
       return {
         name: item.name,
         kelas: item.kelas,
@@ -225,7 +231,7 @@ export function processSupabaseRows(rows: any[], studentEmail?: string | null): 
     const me = studentMap.get(studentEmail.toLowerCase().trim())
     if (me) {
       const avg = me.entries > 0 ? me.totalScore / me.entries : 0
-      userXp = Math.round(me.entries * 250 + avg * 120)
+      userXp = Math.round(me.entries * 250 + avg * 150)
       userStreak = me.entries
     }
   } else if (leaderboard.length > 0) {

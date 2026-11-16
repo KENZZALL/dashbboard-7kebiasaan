@@ -23,8 +23,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const menuItems = [
     { label: 'Edit Beranda', href: '/admin', icon: LayoutGrid },
-    { label: 'Edit Survey', href: '/admin/edit-survey', icon: FileText },
+    // { label: 'Edit Survey', href: '/admin/edit-survey', icon: FileText },
     { label: 'Database Survey', href: '/admin/survey', icon: Database },
+    { label: 'Edit Survey', href: '/admin/question', icon: FileText },
     { label: 'Edit Tim Pengembang', href: '/admin/tim', icon: Users },
   ]
 
