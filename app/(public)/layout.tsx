@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Menu,
   X,
+  ArrowLeft,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -33,33 +34,31 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     async function loadLogo() {
       const { data } = await supabase
-        .from('site_settings')
-        .select('nexara_logo_url')
+        .from('home_config')
+        .select('logo_url, hero_media_url')
+        .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-
-      if (data?.nexara_logo_url) {
-        setLogoUrl(data.nexara_logo_url)
-      }
+      if (data) setLogoUrl(data.logo_url || data.hero_media_url || '')
     }
-
     loadLogo()
-  }, [supabase])
+  }, [])
 
   const isHomePage = pathname === '/'
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20 lg:pb-0">
+      {/* Mobile Header */}
       <header className="sticky top-0 z-40 lg:hidden bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 py-3 flex items-center justify-between shadow-xs">
         <Link href="/" className="flex items-center gap-2.5 min-w-0">
           {logoUrl ? (
             <img
               src={logoUrl}
               alt="Logo Nexara"
-              className="h-9 w-9 rounded-xl object-contain p-0.5 bg-slate-900 shrink-0"
+              className="h-9 w-9 rounded-xl object-cover bg-slate-900 shrink-0"
             />
           ) : (
-            <div className="h-9 w-9 rounded-xl bg-indigo-600 text-white font-black text-xs flex items-center justify-center shrink-0">
+            <div className="h-9 w-9 rounded-xl bg-slate-900 text-white font-black text-xs flex items-center justify-center shrink-0">
               NX
             </div>
           )}
@@ -73,17 +72,46 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
           </div>
         </Link>
 
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-xs font-bold active:scale-95 transition-all"
-          aria-label="Menu Lengkap"
-        >
-          <Menu size={18} />
-          <span>Menu</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {!isHomePage && (
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold"
+            >
+              <ArrowLeft size={14} />
+              <span>Beranda</span>
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 text-xs font-bold"
+          >
+            <Menu size={17} />
+            <span>Menu</span>
+          </button>
+        </div>
       </header>
 
+      {/* Tombol Kembali ke Beranda Utama (Global Sub-Page Bar untuk Desktop & Mobile) */}
+      {!isHomePage && (
+        <div className="bg-white border-b border-slate-200/70 px-4 sm:px-8 py-2.5">
+          <div className="max-w-5xl mx-auto flex items-center justify-between">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 text-xs font-extrabold transition-all"
+            >
+              <ArrowLeft size={15} />
+              <span>Kembali ke Beranda Utama</span>
+            </Link>
+            <span className="text-[11px] font-bold text-slate-400 hidden sm:inline">
+              NEXARA • 7 Kebiasaan Anak Indonesia Hebat
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Drawer */}
       {drawerOpen && (
         <div
           className="fixed inset-0 z-50 lg:hidden bg-slate-900/60 backdrop-blur-xs flex justify-end"
@@ -111,7 +139,6 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
                 {NAV_ITEMS.map((item) => {
                   const Icon = item.icon
                   const isActive = pathname === item.href
-
                   return (
                     <Link
                       key={item.href}
@@ -130,24 +157,17 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
                 })}
               </nav>
             </div>
-
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-              <p className="text-[11px] font-bold text-slate-600">
-                Gerakan 7 Kebiasaan Anak Indonesia Hebat
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">SMAN 5 Semarang</p>
-            </div>
           </div>
         </div>
       )}
 
-      <div className={isHomePage ? '' : 'w-full'}>{children}</div>
+      <div className="w-full">{children}</div>
 
-      <nav className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 px-1.5 py-1.5 flex items-center justify-around shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
+      {/* Bottom Navigation HP */}
+      <nav className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 px-1.5 py-1.5 flex items-center justify-around">
         {NAV_ITEMS.slice(0, 5).map((item) => {
           const Icon = item.icon
           const isActive = pathname === item.href
-
           return (
             <Link
               key={item.href}

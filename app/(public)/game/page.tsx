@@ -19,6 +19,9 @@ import {
   BookOpen,
   Users,
   ShieldCheck,
+  Flame,
+  Star,
+  Keyboard,
 } from 'lucide-react'
 
 type Option = {
@@ -41,6 +44,13 @@ type AnswerRecord = {
   habit: string
 }
 
+const MASCOT_QUOTES = [
+  'Semangat! Satu kebiasaan kecil hari ini membentuk masa depan hebatmu! 🌱',
+  'Keren! Pilihanmu mencerminkan karakter pelajar SMAN 5 Semarang! ✨',
+  'Terus jaga ritme positifmu, setiap langkah konsisten sangat berarti! ⚡',
+  'Wah, refleksi dirimu makin tajam! Lanjutkan ke tantangan berikutnya! 🎯',
+]
+
 export default function GameKuisPage() {
   const supabase = createClient()
   const router = useRouter()
@@ -54,9 +64,16 @@ export default function GameKuisPage() {
   const [selectedChoiceKey, setSelectedChoiceKey] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [timerText, setTimerText] = useState('Rotasi Soal: --:--:--')
+  const [slotThemeLabel, setSlotThemeLabel] = useState('SESI HARIAN • KARAKTER HEBAT')
+  const [nexaraLogoUrl, setNexaraLogoUrl] = useState('')
 
-  // Gamifikasi XP & Level
+  // Gamifikasi XP, Combo Streak & Speed Bonus
   const [xp, setXp] = useState(0)
+  const [combo, setCombo] = useState(0)
+  const [maxCombo, setMaxCombo] = useState(0)
+  const [lastEarnedXp, setLastEarnedXp] = useState<number>(100)
+  const [questionStartTime, setQuestionStartTime] = useState<number>(0)
+  const [mascotSpeech, setMascotSpeech] = useState<string>(MASCOT_QUOTES[0])
 
   // Hasil & Refleksi
   const [resultTitle, setResultTitle] = useState('')
@@ -74,19 +91,27 @@ export default function GameKuisPage() {
   const [communityPercentage, setCommunityPercentage] = useState<number | null>(null)
   const [totalPlayers, setTotalPlayers] = useState<number>(0)
 
-  // Ambil total pemain aktif saat halaman dimuat
+  // Ambil total pemain aktif & Logo Nexara saat halaman dimuat
   useEffect(() => {
-    async function loadCommunityStats() {
-      const { count } = await supabase
-        .from('hasil_kuis')
-        .select('*', { count: 'exact', head: true })
+    async function loadInitialData() {
+      const [{ count }, { data: homeCfg }] = await Promise.all([
+        supabase.from('hasil_kuis').select('*', { count: 'exact', head: true }),
+        supabase
+          .from('home_config')
+          .select('logo_url, hero_media_url')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ])
+
       if (count !== null) setTotalPlayers(count)
+      if (homeCfg) setNexaraLogoUrl(homeCfg.logo_url || homeCfg.hero_media_url || '')
     }
-    loadCommunityStats()
+    loadInitialData()
   }, [])
 
-  // SINTESIS SUARA AUDIO FX (Web Audio API)
-  const playSound = (type: 'click' | 'fanfare') => {
+  // SINTESIS SUARA AUDIO FX (Web Audio API: click, combo, fanfare)
+  const playSound = (type: 'click' | 'combo' | 'fanfare') => {
     if (isMuted) return
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
@@ -98,13 +123,27 @@ export default function GameKuisPage() {
         const gain = ctx.createGain()
         osc.type = 'sine'
         osc.frequency.setValueAtTime(600, ctx.currentTime)
-        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08)
-        gain.gain.setValueAtTime(0.3, ctx.currentTime)
+        osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.08)
+        gain.gain.setValueAtTime(0.28, ctx.currentTime)
         gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08)
         osc.connect(gain)
         gain.connect(ctx.destination)
         osc.start()
         osc.stop(ctx.currentTime + 0.08)
+      } else if (type === 'combo') {
+        const notes = [523.25, 659.25, 783.99]
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.type = 'sine'
+          osc.frequency.value = freq
+          gain.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.055)
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.055 + 0.16)
+          osc.connect(gain)
+          gain.connect(ctx.destination)
+          osc.start(ctx.currentTime + idx * 0.055)
+          osc.stop(ctx.currentTime + idx * 0.055 + 0.16)
+        })
       } else if (type === 'fanfare') {
         const notes = [440, 554.37, 659.25, 880]
         notes.forEach((freq, idx) => {
@@ -125,7 +164,7 @@ export default function GameKuisPage() {
     }
   }
 
-  // Hitung Time Slot Saat Ini (0: 00-06, 1: 06-12, 2: 12-18, 3: 18-24)
+  // Hitung Time Slot Saat Ini (dipanggil di event handler & useEffect)
   const getCurrentTimeSlot = () => {
     const hour = new Date().getHours()
     if (hour >= 0 && hour < 6) return 0
@@ -134,10 +173,19 @@ export default function GameKuisPage() {
     return 3
   }
 
-  // Timer Rotasi 6 Jam
+  // Timer Rotasi 6 Jam & Label Tema Sesi (aman di dalam useEffect)
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date()
+      const slot = getCurrentTimeSlot()
+      const labels = [
+        'SESI DINI HARI • KETAJAMAN NIAT',
+        'SESI PAGI • ENERGI & DISIPLIN',
+        'SESI SIANG • FOKUS & LITERASI',
+        'SESI MALAM • REFLEKSI & KETENANGAN',
+      ]
+      setSlotThemeLabel(labels[slot])
+
       const secondsInDay = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()
       const sixHoursInSeconds = 6 * 3600
       const secondsUntilNextSlot = sixHoursInSeconds - (secondsInDay % sixHoursInSeconds)
@@ -165,6 +213,8 @@ export default function GameKuisPage() {
     setUserAnswers([])
     setSelectedChoiceKey(null)
     setXp(0)
+    setCombo(0)
+    setMaxCombo(0)
     setCommunityPercentage(null)
     setCopiedText(false)
     setLoading(true)
@@ -182,6 +232,7 @@ export default function GameKuisPage() {
 
       if (data && data.length > 0) {
         setCurrentQuestions(data as QuestionData[])
+        setQuestionStartTime(Date.now())
       } else {
         alert('Belum ada data soal untuk slot jam ini di database!')
         setScreen('start')
@@ -195,14 +246,31 @@ export default function GameKuisPage() {
     }
   }
 
-  // Pilih Opsi Jawaban (dengan feedback visual & +100 XP)
+  // Pilih Opsi Jawaban (dengan Speed Bonus XP, Combo Streak & Feedback Visual)
   const selectOption = (optionKey: string, option: Option) => {
-    if (selectedChoiceKey) return // Cegah klik ganda
+    if (selectedChoiceKey) return
     setSelectedChoiceKey(optionKey)
-    playSound('click')
+
+    const elapsedSeconds = questionStartTime > 0 ? (Date.now() - questionStartTime) / 1000 : 10
+    const isFastAnswer = elapsedSeconds <= 8
+    const nextCombo = isFastAnswer ? combo + 1 : 1
+    const speedBonus = isFastAnswer ? 25 : 0
+    const comboBonus = nextCombo >= 2 ? nextCombo * 10 : 0
+    const earned = 100 + speedBonus + comboBonus
+
+    setCombo(nextCombo)
+    setMaxCombo((prev) => Math.max(prev, nextCombo))
+    setLastEarnedXp(earned)
+    setXp((prev) => prev + earned)
+
+    if (nextCombo >= 2) {
+      playSound('combo')
+    } else {
+      playSound('click')
+    }
 
     const currentQ = currentQuestions[currentIndex]
-    setXp((prev) => prev + 100)
+    setMascotSpeech(MASCOT_QUOTES[(currentIndex + 1) % MASCOT_QUOTES.length])
 
     setScores((prev) => ({
       ...prev,
@@ -222,11 +290,29 @@ export default function GameKuisPage() {
       setSelectedChoiceKey(null)
       if (currentIndex + 1 < currentQuestions.length) {
         setCurrentIndex((prev) => prev + 1)
+        setQuestionStartTime(Date.now())
       } else {
         showResult(updatedAnswers)
       }
-    }, 450)
+    }, 520)
   }
+
+  // Dukungan Shortcut Keyboard (A/1, B/2, C/3) saat layar kuis aktif
+  useEffect(() => {
+    if (screen !== 'quiz' || loading || selectedChoiceKey) return
+    const currentQ = currentQuestions[currentIndex]
+    if (!currentQ) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toUpperCase()
+      if (k === 'A' || k === '1') selectOption('A', currentQ.opsi_a)
+      else if (k === 'B' || k === '2') selectOption('B', currentQ.opsi_b)
+      else if (k === 'C' || k === '3') selectOption('C', currentQ.opsi_c)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [screen, loading, selectedChoiceKey, currentIndex, currentQuestions])
 
   // Tampilkan Hasil Kuis & Simpan Ke Database
   const showResult = async (finalAnswers: AnswerRecord[]) => {
@@ -250,13 +336,19 @@ export default function GameKuisPage() {
 
     if (maxScore >= 8) {
       setAwarenessLevel('Fokus & Konsisten Tinggi 🎯')
-      setAwarenessDesc('Jawabanmu menunjukkan kecenderungan karakter yang sangat kuat dan konsisten di satu bidang utama.')
+      setAwarenessDesc(
+        'Jawabanmu menunjukkan kecenderungan karakter yang sangat kuat dan konsisten di satu bidang utama.'
+      )
     } else if (maxScore >= 5) {
       setAwarenessLevel('Seimbang & Reflektif ⚖️')
-      setAwarenessDesc('Kamu memiliki keseimbangan kebiasaan yang fleksibel dan mempertimbangkan situasi secara matang.')
+      setAwarenessDesc(
+        'Kamu memiliki keseimbangan kebiasaan yang fleksibel dan mempertimbangkan situasi secara matang.'
+      )
     } else {
       setAwarenessLevel('Eksploratif & Dinamis 🌟')
-      setAwarenessDesc('Jawabanmu bervariasi secara alami, menandakan kamu siap mencoba berbagai kebiasaan positif baru.')
+      setAwarenessDesc(
+        'Jawabanmu bervariasi secara alami, menandakan kamu siap mencoba berbagai kebiasaan positif baru.'
+      )
     }
 
     let title = '⚡ Si Pelopor Disiplin & Sehat'
@@ -322,7 +414,7 @@ export default function GameKuisPage() {
   // FUNGSI BAGIKAN TEKS HASIL
   const copyShareText = () => {
     playSound('click')
-    const textToShare = `🎮 Tipe Kebiasaan Hebatku: ${resultTitle}\n"${resultDesc}"\n\nYuk ikutan kuis 7 Kebiasaan Anak Indonesia Hebat SMAN 5 Semarang!`
+    const textToShare = `🎮 Tipe Kebiasaan Hebatku: ${resultTitle} (${xp} XP)\n"${resultDesc}"\n\nYuk ikutan kuis 7 Kebiasaan Anak Indonesia Hebat SMAN 5 Semarang!`
     navigator.clipboard.writeText(textToShare)
     setCopiedText(true)
     setTimeout(() => setCopiedText(false), 3000)
@@ -541,74 +633,99 @@ export default function GameKuisPage() {
     link.click()
   }
 
-  // Komponen SVG Maskot Dinamis
-  const MascotSVG = ({ variant }: { variant?: string }) => (
-    <svg
-      className="w-28 h-28 mx-auto drop-shadow-md hover:scale-105 transition-all animate-bounce"
-      viewBox="0 0 200 220"
+  // Komponen SVG Maskot Dinamis Interaktif
+  const MascotSVG = ({
+    variant,
+    sizeClass = 'w-28 h-28',
+  }: {
+    variant?: string
+    sizeClass?: string
+  }) => (
+    <button
+      type="button"
+      onClick={() => {
+        playSound('click')
+        setMascotSpeech(MASCOT_QUOTES[Math.floor(Math.random() * MASCOT_QUOTES.length)])
+      }}
+      title="Ketuk Maskot untuk semangat tambahan!"
+      className="mx-auto block cursor-pointer focus:outline-none group"
     >
-      <path
-        d="M 100 25 C 160 30, 185 85, 175 140 C 165 180, 135 195, 100 195 C 65 195, 35 180, 25 140 C 15 85, 40 30, 100 25 Z"
-        fill="#80C242"
-        stroke="#468826"
-        strokeWidth="3"
-      />
-      <path d="M 100 30 L 100 190" stroke="#5E9C30" strokeWidth="2.5" opacity="0.6" />
-      <path
-        d="M 100 25 C 85 10, 85 -5, 100 -5 C 115 -5, 115 10, 100 25 Z"
-        fill="#80C242"
-        stroke="#468826"
-        strokeWidth="2"
-      />
-      <ellipse cx="72" cy="110" rx="16" ry="20" fill="#1C2D42" />
-      <ellipse cx="72" cy="110" rx="14" ry="18" fill="#1E78B4" />
-      <ellipse cx="72" cy="114" rx="9" ry="12" fill="#38B6FF" />
-      <circle cx="67" cy="100" r="6" fill="#FFFFFF" />
-      <ellipse cx="128" cy="110" rx="16" ry="20" fill="#1C2D42" />
-      <ellipse cx="128" cy="110" rx="14" ry="18" fill="#1E78B4" />
-      <ellipse cx="128" cy="114" rx="9" ry="12" fill="#38B6FF" />
-      <circle cx="123" cy="100" r="6" fill="#FFFFFF" />
-      <path d="M 62 82 Q 72 78 80 84" stroke="#3A6E1F" strokeWidth="3" fill="none" />
-      <path d="M 138 82 Q 128 78 120 84" stroke="#3A6E1F" strokeWidth="3" fill="none" />
-      <ellipse cx="58" cy="128" rx="9" ry="5" fill="#FF7675" opacity="0.85" />
-      <ellipse cx="142" cy="128" rx="9" ry="5" fill="#FF7675" opacity="0.85" />
-      <path d="M 88 126 Q 100 142 112 126 Z" fill="#D63031" />
-      <rect x="75" y="185" width="12" height="15" fill="#69AB2D" rx="4" />
-      <rect x="113" y="185" width="12" height="15" fill="#69AB2D" rx="4" />
-
-      {variant === 'reading' && (
-        <>
-          <circle cx="72" cy="110" r="17" fill="none" stroke="#2C3E50" strokeWidth="4" />
-          <circle cx="128" cy="110" r="17" fill="none" stroke="#2C3E50" strokeWidth="4" />
-          <line x1="89" y1="110" x2="111" y2="110" stroke="#2C3E50" strokeWidth="4" />
-        </>
-      )}
-      {variant === 'star' && (
-        <polygon
-          points="100,5 106,20 122,20 109,30 114,45 100,35 86,45 91,30 78,20 94,20"
-          fill="#F1C40F"
-          stroke="#F39C12"
-          strokeWidth="1.5"
+      <svg
+        className={`${sizeClass} mx-auto drop-shadow-md group-hover:scale-110 transition-transform animate-bounce`}
+        viewBox="0 0 200 220"
+      >
+        <path
+          d="M 100 25 C 160 30, 185 85, 175 140 C 165 180, 135 195, 100 195 C 65 195, 35 180, 25 140 C 15 85, 40 30, 100 25 Z"
+          fill="#80C242"
+          stroke="#468826"
+          strokeWidth="3"
         />
-      )}
-    </svg>
+        <path d="M 100 30 L 100 190" stroke="#5E9C30" strokeWidth="2.5" opacity="0.6" />
+        <path
+          d="M 100 25 C 85 10, 85 -5, 100 -5 C 115 -5, 115 10, 100 25 Z"
+          fill="#80C242"
+          stroke="#468826"
+          strokeWidth="2"
+        />
+        <ellipse cx="72" cy="110" rx="16" ry="20" fill="#1C2D42" />
+        <ellipse cx="72" cy="110" rx="14" ry="18" fill="#1E78B4" />
+        <ellipse cx="72" cy="114" rx="9" ry="12" fill="#38B6FF" />
+        <circle cx="67" cy="100" r="6" fill="#FFFFFF" />
+        <ellipse cx="128" cy="110" rx="16" ry="20" fill="#1C2D42" />
+        <ellipse cx="128" cy="110" rx="14" ry="18" fill="#1E78B4" />
+        <ellipse cx="128" cy="114" rx="9" ry="12" fill="#38B6FF" />
+        <circle cx="123" cy="100" r="6" fill="#FFFFFF" />
+        <path d="M 62 82 Q 72 78 80 84" stroke="#3A6E1F" strokeWidth="3" fill="none" />
+        <path d="M 138 82 Q 128 78 120 84" stroke="#3A6E1F" strokeWidth="3" fill="none" />
+        <ellipse cx="58" cy="128" rx="9" ry="5" fill="#FF7675" opacity="0.85" />
+        <ellipse cx="142" cy="128" rx="9" ry="5" fill="#FF7675" opacity="0.85" />
+        <path d="M 88 126 Q 100 142 112 126 Z" fill="#D63031" />
+        <rect x="75" y="185" width="12" height="15" fill="#69AB2D" rx="4" />
+        <rect x="113" y="185" width="12" height="15" fill="#69AB2D" rx="4" />
+
+        {variant === 'reading' && (
+          <>
+            <circle cx="72" cy="110" r="17" fill="none" stroke="#2C3E50" strokeWidth="4" />
+            <circle cx="128" cy="110" r="17" fill="none" stroke="#2C3E50" strokeWidth="4" />
+            <line x1="89" y1="110" x2="111" y2="110" stroke="#2C3E50" strokeWidth="4" />
+          </>
+        )}
+        {variant === 'star' && (
+          <polygon
+            points="100,5 106,20 122,20 109,30 114,45 100,35 86,45 91,30 78,20 94,20"
+            fill="#F1C40F"
+            stroke="#F39C12"
+            strokeWidth="1.5"
+          />
+        )}
+      </svg>
+    </button>
   )
 
   const currentQ = currentQuestions[currentIndex]
   const level = Math.floor(xp / 300) + 1
+  const xpProgressInLevel = Math.round(((xp % 300) / 300) * 100)
   const progressPct = Math.round(((currentIndex + 1) / (currentQuestions.length || 1)) * 100)
 
   return (
-    <div className="flex bg-slate-50 min-h-screen p-4 gap-6 font-sans">
+    <div className="flex bg-slate-50 min-h-screen p-3 sm:p-4 gap-6 font-sans">
       {/* Element Canvas Tersembunyi untuk Poster PNG */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Navigasi Sidebar Kiri Konsisten dengan Beranda */}
+      {/* Navigasi Sidebar Kiri Konsisten dengan Beranda + Logo Nexara */}
       <aside className="w-64 bg-white rounded-3xl shadow-sm border border-slate-100 p-5 hidden lg:flex flex-col shrink-0">
         <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-sm shadow-sm">
-            NX
-          </div>
+          {nexaraLogoUrl ? (
+            <img
+              src={nexaraLogoUrl}
+              alt="Logo Nexara"
+              className="h-12 w-12 rounded-2xl object-cover bg-slate-950 border border-slate-200 shrink-0 shadow-sm"
+            />
+          ) : (
+            <div className="h-12 w-12 rounded-2xl bg-slate-950 flex items-center justify-center text-white font-black text-sm shadow-sm shrink-0">
+              NX
+            </div>
+          )}
           <div>
             <p className="text-sm font-extrabold text-slate-800">NEXARA • 7 KAIH</p>
             <p className="text-[11px] text-slate-500">SMAN 5 Semarang</p>
@@ -650,27 +767,45 @@ export default function GameKuisPage() {
       </aside>
 
       {/* Konten Utama Kuis Game */}
-      <main className="flex-1 space-y-6 min-w-0">
-        {/* Top Game HUD Bar (Level, XP, Timer Rotasi & Audio FX) */}
-        <header className="flex flex-wrap items-center justify-between bg-white p-4 px-6 rounded-2xl shadow-sm border border-slate-100 gap-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center font-black">
+      <main className="flex-1 space-y-5 sm:space-y-6 min-w-0">
+        {/* Top Game HUD Bar (Level, Progress Level, Combo Streak, Timer Rotasi & Audio FX) */}
+        <header className="flex flex-wrap items-center justify-between bg-white p-4 px-5 sm:px-6 rounded-2xl shadow-sm border border-slate-100 gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center font-black shadow-xs">
               <Trophy size={20} />
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase text-slate-400">Status Karakter</p>
-              <p className="text-sm font-black text-slate-800">
-                Level {level} • <span className="text-indigo-600">{xp} XP</span>
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-extrabold uppercase text-slate-400">
+                  Status Karakter
+                </p>
+                {combo >= 2 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 text-[10px] font-black animate-pulse">
+                    <Flame size={11} /> {combo}x Combo!
+                  </span>
+                )}
+              </div>
+              <p className="text-sm font-black text-slate-800 flex items-center gap-2">
+                <span>Level {level}</span>
+                <span className="text-slate-300">•</span>
+                <span className="text-indigo-600">{xp} XP</span>
               </p>
+              <div className="w-28 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
+                <div
+                  className="h-full bg-amber-400 transition-all duration-300"
+                  style={{ width: `${xpProgressInLevel}%` }}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <div className="bg-indigo-50 text-indigo-700 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5">
               <Clock size={14} />
               <span>{timerText}</span>
             </div>
             <button
+              type="button"
               onClick={() => setIsMuted(!isMuted)}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer"
             >
@@ -680,71 +815,127 @@ export default function GameKuisPage() {
           </div>
         </header>
 
-        {/* 1. LAYAR UTAMA (START LOBBY) */}
+        {/* 1. LAYAR UTAMA (START LOBBY KOSMIK NEXARA) */}
         {screen === 'start' && (
-          <div className="relative overflow-hidden bg-gradient-to-br from-indigo-950 via-purple-900 to-slate-900 text-white rounded-3xl p-8 sm:p-10 shadow-xl border border-indigo-500/20 text-center space-y-6">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 border border-white/15 text-indigo-200 text-xs font-bold">
-              <Sparkles size={14} className="text-amber-300" />
-              <span>7 KAIH HABIT QUEST • SMAN 5 SEMARANG</span>
-            </div>
+          <div className="relative overflow-hidden bg-slate-950 text-white rounded-3xl p-7 sm:p-10 shadow-xl border border-slate-800 text-center space-y-6">
+            {nexaraLogoUrl && (
+              <img
+                src={nexaraLogoUrl}
+                alt="Nexara Cosmic Background"
+                className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none"
+              />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-b from-slate-950/75 via-indigo-950/80 to-slate-950/95 pointer-events-none" />
 
-            <MascotSVG />
-
-            <div className="space-y-2 max-w-xl mx-auto">
-              <h1 className="text-3xl sm:text-4xl font-black tracking-tight">
-                Temukan Tipe Kebiasaan Hebatmu!
-              </h1>
-              <p className="text-sm text-indigo-100/85 leading-relaxed">
-                Jawab 10 pertanyaan simulasi harian sesuai rotasi waktu, kumpulkan poin XP, dan dapatkan Poster Karakter PNG serta tips kebiasaan personalmu!
-              </p>
-            </div>
-
-            {/* 3 Kartu Preview Karakter */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl mx-auto text-left">
-              <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10">
-                <ShieldCheck size={20} className="text-purple-300 mb-1.5" />
-                <p className="text-xs font-bold">Pelopor Disiplin</p>
-                <p className="text-[11px] text-indigo-200 mt-0.5">Bangun pagi, olahraga & hidup teratur</p>
+            <div className="relative z-10 space-y-6">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-indigo-200 text-xs font-bold">
+                <Sparkles size={14} className="text-amber-300" />
+                <span>7 KAIH HABIT QUEST • {slotThemeLabel}</span>
               </div>
-              <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10">
-                <BookOpen size={20} className="text-blue-300 mb-1.5" />
-                <p className="text-xs font-bold">Pembelajar Sejati</p>
-                <p className="text-[11px] text-indigo-200 mt-0.5">Gemar membaca & rasa ingin tahu tinggi</p>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10">
-                <Users size={20} className="text-emerald-300 mb-1.5" />
-                <p className="text-xs font-bold">Bintang Gotong Royong</p>
-                <p className="text-[11px] text-indigo-200 mt-0.5">Peduli sesama & aktif bermasyarakat</p>
-              </div>
-            </div>
 
-            <div className="max-w-md mx-auto pt-2">
-              <button
-                onClick={startGame}
-                className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 to-orange-500 hover:scale-[1.02] text-slate-950 font-black py-4 rounded-2xl shadow-lg transition-all text-base cursor-pointer"
-              >
-                <Zap size={20} />
-                <span>Mulai Kuis Sekarang 🚀</span>
-              </button>
+              <MascotSVG />
+
+              <div className="max-w-md mx-auto bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl px-4 py-2 text-xs text-indigo-100 font-medium">
+                "{mascotSpeech}"
+              </div>
+
+              <div className="space-y-2 max-w-xl mx-auto">
+                <h1 className="text-3xl sm:text-4xl font-black tracking-tight">
+                  Temukan Tipe Kebiasaan Hebatmu!
+                </h1>
+                <p className="text-sm text-indigo-100/85 leading-relaxed">
+                  Jawab 10 pertanyaan simulasi harian sesuai rotasi waktu, kumpulkan poin XP &
+                  Combo Bonus, dan dapatkan Poster Karakter PNG serta tips kebiasaan personalmu!
+                </p>
+              </div>
+
+              {/* 3 Kartu Preview Karakter */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl mx-auto text-left">
+                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 hover:border-purple-400/50 transition-all">
+                  <ShieldCheck size={20} className="text-purple-300 mb-1.5" />
+                  <p className="text-xs font-bold">Pelopor Disiplin</p>
+                  <p className="text-[11px] text-indigo-200 mt-0.5">
+                    Bangun pagi, olahraga & hidup teratur
+                  </p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 hover:border-blue-400/50 transition-all">
+                  <BookOpen size={20} className="text-blue-300 mb-1.5" />
+                  <p className="text-xs font-bold">Pembelajar Sejati</p>
+                  <p className="text-[11px] text-indigo-200 mt-0.5">
+                    Gemar membaca & rasa ingin tahu tinggi
+                  </p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 hover:border-emerald-400/50 transition-all">
+                  <Users size={20} className="text-emerald-300 mb-1.5" />
+                  <p className="text-xs font-bold">Bintang Gotong Royong</p>
+                  <p className="text-[11px] text-indigo-200 mt-0.5">
+                    Peduli sesama & aktif bermasyarakat
+                  </p>
+                </div>
+              </div>
+
+              <div className="max-w-md mx-auto pt-2 space-y-2.5">
+                <button
+                  type="button"
+                  onClick={startGame}
+                  className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 to-orange-500 hover:scale-[1.02] text-slate-950 font-black py-4 rounded-2xl shadow-lg transition-all text-base cursor-pointer"
+                >
+                  <Zap size={20} />
+                  <span>Mulai Kuis Sekarang 🚀</span>
+                </button>
+                <p className="text-[11px] text-indigo-300/80 flex items-center justify-center gap-1.5">
+                  <Star size={12} className="text-amber-300" />
+                  <span>Tips: Jawab di bawah 8 detik untuk meraih Speed Bonus & Combo XP!</span>
+                </p>
+              </div>
             </div>
           </div>
         )}
 
         {/* 2. LAYAR KUIS INTERAKTIF (QUIZ) */}
         {screen === 'quiz' && (
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-10 space-y-6">
-            <div className="space-y-2 max-w-2xl mx-auto">
-              <div className="flex justify-between text-xs font-bold">
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-9 space-y-6">
+            {/* Bar Progres & Live Habit Meter */}
+            <div className="space-y-3 max-w-2xl mx-auto">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
                 <span className="text-indigo-600">
                   Tantangan {currentIndex + 1} dari {currentQuestions.length || 10}
                 </span>
-                <span className="text-slate-400">{progressPct}% Selesai</span>
+                <div className="flex items-center gap-2">
+                  {combo >= 2 && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-extrabold">
+                      🔥 Streak {combo}x
+                    </span>
+                  )}
+                  <span className="text-slate-400">{progressPct}% Selesai</span>
+                </div>
               </div>
+
               <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
                 <div
                   className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 h-full transition-all duration-300 rounded-full"
                   style={{ width: `${progressPct}%` }}
                 />
+              </div>
+
+              {/* Mini Live Habit Meter */}
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className="bg-indigo-50/70 px-3 py-1.5 rounded-xl flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-slate-600">Teratur</span>
+                  <span className="font-black text-indigo-700">{scores['Teratur'] || 0}</span>
+                </div>
+                <div className="bg-purple-50/70 px-3 py-1.5 rounded-xl flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-slate-600">Membaca</span>
+                  <span className="font-black text-purple-700">
+                    {scores['Gemar Membaca'] || 0}
+                  </span>
+                </div>
+                <div className="bg-emerald-50/70 px-3 py-1.5 rounded-xl flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-slate-600">Gotong Royong</span>
+                  <span className="font-black text-emerald-700">
+                    {(scores['Gotong Royong'] || 0) + (scores['Sosial'] || 0)}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -754,6 +945,20 @@ export default function GameKuisPage() {
               </p>
             ) : currentQ ? (
               <div className="space-y-6 max-w-2xl mx-auto">
+                <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className="shrink-0">
+                    <MascotSVG sizeClass="w-16 h-16" />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600">
+                      Pendamping 7 KAIH
+                    </span>
+                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                      {mascotSpeech}
+                    </p>
+                  </div>
+                </div>
+
                 <h2 className="text-lg sm:text-xl font-extrabold text-slate-800 text-center min-h-[64px] flex items-center justify-center leading-snug">
                   {currentQ.pertanyaan}
                 </h2>
@@ -768,6 +973,7 @@ export default function GameKuisPage() {
                     return (
                       <button
                         key={key}
+                        type="button"
                         onClick={() => selectOption(key, opt)}
                         className={`w-full text-left p-4 sm:p-5 rounded-2xl border-2 transition-all flex items-center justify-between gap-4 cursor-pointer ${
                           isSelected
@@ -792,13 +998,18 @@ export default function GameKuisPage() {
 
                         {isSelected && (
                           <span className="shrink-0 inline-flex items-center gap-1 text-xs font-extrabold text-indigo-700 bg-indigo-100 px-3 py-1 rounded-full">
-                            <CheckCircle2 size={14} /> +100 XP
+                            <CheckCircle2 size={14} /> +{lastEarnedXp} XP
                           </span>
                         )}
                       </button>
                     )
                   })}
                 </div>
+
+                <p className="hidden sm:flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+                  <Keyboard size={13} />
+                  <span>Gunakan tombol keyboard A, B, atau C untuk memilih lebih cepat</span>
+                </p>
               </div>
             ) : null}
           </div>
@@ -810,8 +1021,15 @@ export default function GameKuisPage() {
             <div className="max-w-2xl mx-auto space-y-6">
               <div className="text-center space-y-3">
                 <MascotSVG variant={resultTitle.includes('Cerdas') ? 'reading' : 'star'} />
-                <div className="inline-flex items-center gap-2 bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-xs font-extrabold uppercase">
-                  <span>Profil Kebiasaan Kamu • {xp} XP</span>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-xs font-extrabold uppercase">
+                    <Zap size={13} /> Total {xp} XP
+                  </span>
+                  {maxCombo >= 2 && (
+                    <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 px-3.5 py-1.5 rounded-full text-xs font-extrabold">
+                      <Flame size={13} /> Rekor Combo {maxCombo}x
+                    </span>
+                  )}
                 </div>
                 <h2 className="text-2xl sm:text-3xl font-black text-slate-800">{resultTitle}</h2>
                 <div className="bg-indigo-50/60 p-4 rounded-2xl text-xs sm:text-sm text-slate-700 font-medium leading-relaxed">
@@ -903,6 +1121,7 @@ export default function GameKuisPage() {
               {/* TOMBOL AKSI */}
               <div className="space-y-3 pt-2">
                 <button
+                  type="button"
                   onClick={() =>
                     router.push(
                       `/survey?result_id=${savedResultId || ''}&profile=${encodeURIComponent(resultTitle)}`
@@ -916,6 +1135,7 @@ export default function GameKuisPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
+                    type="button"
                     onClick={downloadResultCard}
                     className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl transition-all text-xs shadow-sm cursor-pointer"
                   >
@@ -924,6 +1144,7 @@ export default function GameKuisPage() {
                   </button>
 
                   <button
+                    type="button"
                     onClick={copyShareText}
                     className="w-full inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-2xl transition-all text-xs shadow-sm cursor-pointer"
                   >
@@ -933,6 +1154,7 @@ export default function GameKuisPage() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={startGame}
                   className="w-full inline-flex items-center justify-center gap-2 bg-white border-2 border-indigo-200 hover:bg-indigo-50 text-indigo-700 font-bold py-3 rounded-2xl transition-all text-sm cursor-pointer"
                 >

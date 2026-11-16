@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import HeroSection from '@/components/public/HeroSection'
+import RadarChart7KAIH from '@/components/public/RadarChart7KAIH'
 import { createClient } from '@/lib/supabase/client'
 import {
   Search,
@@ -11,19 +12,186 @@ import {
   UserCheck,
   MousePointerClick,
   Sparkles,
+  Flame,
+  Trophy,
+  Award,
+  Zap,
+  Lock,
+  ArrowUpRight,
+  X,
 } from 'lucide-react'
 
 const INDICATOR_DETAILS = [
-  { short: 'Bangun Pagi', full: 'Bangun tidur sebelum pukul 05.30 pagi setiap hari.' },
-  { short: 'Ibadah Tepat', full: 'Menjalankan ibadah sesuai agama/kepercayaan tepat waktu.' },
-  { short: 'Berdoa Harian', full: 'Mengawali dan mengakhiri kegiatan harian dengan berdoa.' },
-  { short: 'Olahraga 3x', full: 'Melakukan aktivitas fisik atau olahraga minimal 3 kali seminggu.' },
-  { short: 'Ekskul/Sekolah', full: 'Berpartisipasi aktif dalam kegiatan olahraga sekolah atau ekstrakurikuler.' },
-  { short: 'Makan Sehat', full: 'Memilih makanan/jajanan sehat yang mengandung buah, sayur, atau protein.' },
-  { short: 'Gemar Membaca', full: 'Meluangkan waktu membaca buku (non-pelajaran/literasi) minimal 15–30 menit setiap hari.' },
-  { short: 'Bantu Ortu', full: 'Membantu pekerjaan rumah tangga di rumah tanpa diperintah.' },
-  { short: 'Tidur Cepat', full: 'Tidur malam tidak melebihi pukul 21.30/22.00.' },
-  { short: 'Bebas Gadget', full: 'Mematikan atau tidak menggunakan gadget/smartphone saat mendekati jam tidur malam.' },
+  { short: 'Bangun Pagi', full: 'Saya bangun pagi tepat waktu.' },
+  { short: 'Beribadah', full: 'Saya beribadah sesuai keyakinan.' },
+  { short: 'Berolahraga', full: 'Saya berolahraga secara teratur.' },
+  { short: 'Makan Sehat', full: 'Saya mengonsumsi makanan sehat dan bergizi.' },
+  { short: 'Gemar Membaca', full: 'Saya meluangkan waktu untuk membaca.' },
+  { short: 'Bermasyarakat', full: 'Saya membantu orang tua dan peduli lingkungan.' },
+  { short: 'Tidur Cepat', full: 'Saya beristirahat dengan cukup.' },
+  { short: 'Belajar', full: 'Saya belajar dengan tekun.' },
+  { short: 'Bersosialisasi', full: 'Saya berinteraksi dengan baik.' },
+  { short: 'Mengatur Waktu', full: 'Saya mengatur waktu dengan baik.' },
+]
+
+type DashboardAnalytics = {
+  completionPct: number
+  overallScore: number
+  totalResponses: number
+  barAverages: number[]
+  sevenDimensions: any[]
+  userBadge: string
+  userStreak: number
+  userXp: number
+  leaderboard: { name: string; kelas: string; xp: number }[]
+}
+
+function processSupabaseRows(rows: any[], email: string | null = null): DashboardAnalytics {
+  const scores = (row: any) =>
+    Array.from({ length: 10 }, (_, index) => {
+      const value = Number(row[`q${index + 1}`])
+      return Number.isFinite(value) && value >= 1 && value <= 5 ? value : null
+    })
+  const allScores = rows.flatMap(scores).filter((value): value is number => value !== null)
+  const barAverages = Array.from({ length: 10 }, (_, index) => {
+    const values = rows.map((row) => scores(row)[index]).filter((value): value is number => value !== null)
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+  })
+  const overallScore = allScores.length
+    ? allScores.reduce((sum, value) => sum + value, 0) / allScores.length
+    : 0
+  const students = new Map<string, { name: string; kelas: string; score: number; count: number }>()
+  rows.forEach((row) => {
+    const studentKey = String(row.email || row.nama || 'anonim').toLowerCase()
+    const values = scores(row).filter((value): value is number => value !== null)
+    if (!values.length) return
+    const student = students.get(studentKey) || {
+      name: row.nama || 'Siswa',
+      kelas: row.kelas || '-',
+      score: 0,
+      count: 0,
+    }
+    student.score += values.reduce((sum, value) => sum + value, 0) / values.length
+    student.count += 1
+    students.set(studentKey, student)
+  })
+  const leaderboard = Array.from(students.values())
+    .map((student) => ({
+      name: student.name,
+      kelas: student.kelas,
+      xp: Math.round((student.score / student.count) * 100),
+    }))
+    .sort((a, b) => b.xp - a.xp)
+  const currentStudent = rows.filter(
+    (row) => email && String(row.email || '').toLowerCase() === email.toLowerCase()
+  )
+  const currentScores = currentStudent.flatMap(scores).filter((value): value is number => value !== null)
+  const userScore = currentScores.length
+    ? currentScores.reduce((sum, value) => sum + value, 0) / currentScores.length
+    : 0
+
+  return {
+    completionPct: Math.round((overallScore / 5) * 100),
+    overallScore,
+    totalResponses: rows.length,
+    barAverages,
+    sevenDimensions: barAverages.slice(0, 7).map((value, index) => ({
+      subject: INDICATOR_DETAILS[index].short,
+      score: value,
+      fullMark: 5,
+    })),
+    userBadge: userScore >= 4 ? 'Konsisten' : userScore > 0 ? 'Terus Bertumbuh' : 'Penjelajah',
+    userStreak: currentStudent.length,
+    userXp: Math.round(userScore * 100),
+    leaderboard,
+  }
+}
+
+function getPredicate(score: number) {
+  if (score >= 4.5) return { label: 'Sangat Baik', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+  if (score >= 3.5) return { label: 'Baik', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' }
+  if (score >= 2.5) return { label: 'Cukup', color: 'bg-amber-50 text-amber-700 border-amber-200' }
+  return { label: 'Perlu Ditingkatkan', color: 'bg-rose-50 text-rose-700 border-rose-200' }
+}
+
+const GLOBAL_SEARCH_INDEX = [
+  {
+    title: 'Formulir Yuk Survey! (Evaluasi Harian)',
+    category: 'Halaman Survei',
+    desc: 'Isi 10 indikator 7 Kebiasaan Anak Indonesia Hebat dengan skala 1–5.',
+    href: '/survey',
+    keywords: 'survey survei evaluasi isi jawaban harian form kuesioner',
+  },
+  {
+    title: 'Main Game: 7 KAIH Habit Quest',
+    category: 'Halaman Game',
+    desc: 'Kuis interaktif rotasi 6 jam dengan sistem level, XP, dan profil karakter.',
+    href: '/game',
+    keywords: 'game kuis main quest xp level karakter',
+  },
+  {
+    title: 'Statistik Pribadi & Rapor Karakter PNG',
+    category: 'Halaman Statistik',
+    desc: 'Lihat grafik radar pribadi, action plan otomatis, riwayat harian, dan unduh rapor.',
+    href: '/statistik',
+    keywords: 'statistik pribadi rapor nilai rata-rata radar riwayat unduh png excel',
+  },
+  {
+    title: 'Tentang 7 KAIH & Tim Pengembang Nexara',
+    category: 'Halaman Tentang',
+    desc: 'Informasi gerakan karakter SMAN 5 Semarang dan profil tim pengembang.',
+    href: '/tentang',
+    keywords: 'tentang tim pengembang nexara sman 5 semarang profil pembina developer',
+  },
+  {
+    title: '1. Bangun Pagi',
+    category: '7 Kebiasaan',
+    desc: 'Membiasakan diri bangun tidur sebelum pukul 05.30 pagi setiap hari.',
+    href: '/survey',
+    keywords: 'bangun pagi 05.30 disiplin subuh',
+  },
+  {
+    title: '2. Beribadah',
+    category: '7 Kebiasaan',
+    desc: 'Menjalankan ibadah tepat waktu dan berdoa sebelum/sesudah beraktivitas.',
+    href: '/survey',
+    keywords: 'beribadah ibadah doa agama tepat waktu',
+  },
+  {
+    title: '3. Berolahraga',
+    category: '7 Kebiasaan',
+    desc: 'Melakukan aktivitas fisik minimal 3 kali seminggu dan aktif di ekstrakurikuler.',
+    href: '/survey',
+    keywords: 'berolahraga olahraga fisik lari senam ekskul',
+  },
+  {
+    title: '4. Makan Sehat & Bergizi',
+    category: '7 Kebiasaan',
+    desc: 'Memilih makanan sehat yang mengandung buah, sayur, atau protein.',
+    href: '/survey',
+    keywords: 'makan sehat bergizi buah sayur protein jajanan',
+  },
+  {
+    title: '5. Gemar Membaca',
+    category: '7 Kebiasaan',
+    desc: 'Meluangkan waktu membaca buku literasi minimal 15–30 menit setiap hari.',
+    href: '/survey',
+    keywords: 'gemar membaca literasi buku belajar',
+  },
+  {
+    title: '6. Membantu Orang Tua (Bermasyarakat)',
+    category: '7 Kebiasaan',
+    desc: 'Membantu pekerjaan rumah tangga dan peduli lingkungan tanpa diperintah.',
+    href: '/survey',
+    keywords: 'membantu orang tua bermasyarakat gotong royong rumah',
+  },
+  {
+    title: '7. Istirahat Cukup (Tidur Cepat)',
+    category: '7 Kebiasaan',
+    desc: 'Tidur malam sebelum pukul 22.00 dan bebas gadget menjelang tidur.',
+    href: '/survey',
+    keywords: 'istirahat cukup tidur cepat gadget malam',
+  },
 ]
 
 function DesktopSidebar({ logoUrl }: { logoUrl: string }) {
@@ -45,10 +213,10 @@ function DesktopSidebar({ logoUrl }: { logoUrl: string }) {
           <img
             src={logoUrl}
             alt="Logo Nexara"
-            className="h-14 w-14 rounded-2xl object-contain p-1 bg-slate-900 border border-slate-200 shrink-0 shadow-sm"
+            className="h-14 w-14 rounded-2xl object-cover bg-slate-950 border border-slate-200 shrink-0 shadow-sm"
           />
         ) : (
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-base shadow-sm shrink-0">
+          <div className="h-14 w-14 rounded-2xl bg-slate-950 flex items-center justify-center text-white font-black text-base shadow-sm shrink-0">
             NX
           </div>
         )}
@@ -156,9 +324,7 @@ export default function HomePage() {
   const [loadingChart, setLoadingChart] = useState(true)
   const [nexaraLogoUrl, setNexaraLogoUrl] = useState('')
   const [savedStudentEmail, setSavedStudentEmail] = useState<string | null>(null)
-  const [barAverages, setBarAverages] = useState<number[]>(Array(10).fill(0))
-  const [totalResponses, setTotalResponses] = useState(0)
-  const [overallScore, setOverallScore] = useState(0)
+  const [analytics, setAnalytics] = useState<DashboardAnalytics>(() => processSupabaseRows([]))
 
   useEffect(() => {
     const email = localStorage.getItem('kaih_student_email')
@@ -166,67 +332,38 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
-    async function fetchSupabaseStats() {
+    async function fetchStats() {
       const { data, error } = await supabase
         .from('survey_responses')
-        .select('q1, q2, q3, q4, q5, q6, q7, q8, q9, q10')
+        .select('id, nama, kelas, email, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10')
 
-      if (!error && Array.isArray(data) && data.length > 0) {
-        const sums = Array(10).fill(0)
-        const counts = Array(10).fill(0)
-
-        data.forEach((row: any) => {
-          const vals = [
-            row.q1,
-            row.q2,
-            row.q3,
-            row.q4,
-            row.q5,
-            row.q6,
-            row.q7,
-            row.q8,
-            row.q9,
-            row.q10,
-          ]
-          vals.forEach((v, idx) => {
-            const num = Number(v)
-            if (num >= 1 && num <= 5) {
-              sums[idx] += num
-              counts[idx] += 1
-            }
-          })
-        })
-
-        const avgs = sums.map((s, i) =>
-          counts[i] > 0 ? Number((s / counts[i]).toFixed(2)) : 0
-        )
-        const validAvgs = avgs.filter((a) => a > 0)
-        const overall =
-          validAvgs.length > 0
-            ? Number((validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length).toFixed(2))
-            : 0
-
-        setBarAverages(avgs)
-        setTotalResponses(data.length)
-        setOverallScore(overall)
+      if (!error && Array.isArray(data)) {
+        const email = localStorage.getItem('kaih_student_email')
+        setAnalytics(processSupabaseRows(data, email))
       }
       setLoadingChart(false)
     }
-
-    fetchSupabaseStats()
+    fetchStats()
   }, [])
 
-  const completionPct = Math.min(100, Math.round((overallScore / 5) * 100))
-  const selectedAvg = barAverages[selectedBarIdx] || 0
+  const trimmedQuery = searchQuery.trim().toLowerCase()
+  const isSearchingAdmin =
+    trimmedQuery.includes('admin') ||
+    trimmedQuery.includes('panel') ||
+    trimmedQuery.includes('database') ||
+    trimmedQuery.includes('edit')
+
+  const globalSearchResults = trimmedQuery
+    ? GLOBAL_SEARCH_INDEX.filter(
+        (item) =>
+          item.title.toLowerCase().includes(trimmedQuery) ||
+          item.desc.toLowerCase().includes(trimmedQuery) ||
+          item.keywords.toLowerCase().includes(trimmedQuery)
+      )
+    : []
+
+  const selectedAvg = analytics.barAverages[selectedBarIdx] || 0
   const selectedPct = Math.round((selectedAvg / 5) * 100)
-
-  const getPredicate = (score: number) => {
-    if (score >= 4.2) return { label: 'Sangat Baik (Membudaya)', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
-    if (score >= 3.4) return { label: 'Baik (Konsisten)', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' }
-    if (score >= 2.5) return { label: 'Cukup (Perlu Pembiasaan)', color: 'bg-amber-100 text-amber-700 border-amber-200' }
-    return { label: 'Perlu Ditingkatkan', color: 'bg-rose-100 text-rose-700 border-rose-200' }
-  }
-
   const selectedPredicate = getPredicate(selectedAvg)
 
   const habits = [
@@ -239,120 +376,231 @@ export default function HomePage() {
     { title: '7. Istirahat Cukup', desc: 'Menjaga pola tidur yang teratur untuk pemulihan energi fisik dan mental.' },
   ]
 
-  const filteredHabits = habits.filter(
-    (h) =>
-      h.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      h.desc.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-
   return (
     <div className="flex bg-slate-50 min-h-screen p-3 sm:p-4 gap-6 font-sans">
       <DesktopSidebar logoUrl={nexaraLogoUrl} />
 
       <main className="flex-1 space-y-5 sm:space-y-6 min-w-0">
-        <header className="flex flex-wrap justify-between items-center bg-white p-3.5 sm:p-4 sm:px-6 rounded-2xl shadow-sm border border-slate-100 gap-3">
-          <div className="flex items-center gap-2.5 bg-slate-100 px-3.5 py-2 rounded-xl flex-1 sm:flex-initial sm:w-72">
-            <Search size={17} className="text-slate-400 shrink-0" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari kebiasaan..."
-              className="bg-transparent text-sm focus:outline-none w-full"
-            />
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <div className="hidden md:flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl text-xs font-bold">
-              <Sparkles size={14} />
-              <span>7 KAIH • SMAN 5 Semarang</span>
+        {/* Global Search Bar dengan Proteksi Halaman Admin */}
+        <header className="relative bg-white p-3.5 sm:p-4 sm:px-6 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <div className="flex items-center gap-2.5 bg-slate-100 px-3.5 py-2.5 rounded-xl flex-1 sm:flex-initial sm:w-80 focus-within:ring-2 focus-within:ring-indigo-500">
+              <Search size={17} className="text-slate-400 shrink-0" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari survei, kuis, statistik, atau kebiasaan..."
+                className="bg-transparent text-sm focus:outline-none w-full text-slate-800"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X size={15} />
+                </button>
+              )}
             </div>
 
-            {savedStudentEmail && (
-              <Link
-                href="/statistik"
-                className="hidden sm:flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-all"
-              >
-                <UserCheck size={14} className="text-indigo-600" />
-                <span className="max-w-[140px] truncate">{savedStudentEmail}</span>
-              </Link>
-            )}
+            <div className="flex items-center gap-2.5">
+              <div className="hidden md:flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl text-xs font-bold">
+                <Sparkles size={14} />
+                <span>7 KAIH • SMAN 5 Semarang</span>
+              </div>
 
-            <Link
-              href="/survey"
-              className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-sm whitespace-nowrap"
-            >
-              + Isi Survey
-            </Link>
+              {savedStudentEmail && (
+                <Link
+                  href="/statistik"
+                  className="hidden sm:flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-all"
+                >
+                  <UserCheck size={14} className="text-indigo-600" />
+                  <span className="max-w-[140px] truncate">{savedStudentEmail}</span>
+                </Link>
+              )}
+
+              <Link
+                href="/survey"
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-sm whitespace-nowrap"
+              >
+                + Isi Survey
+              </Link>
+            </div>
           </div>
+
+          {/* Dropdown Hasil Pencarian Lintas Halaman */}
+          {trimmedQuery && (
+            <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+              {isSearchingAdmin && (
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <Lock size={16} className="text-amber-600 shrink-0" />
+                    <div>
+                      <p className="text-xs font-extrabold text-amber-900">
+                        Area Panel Admin Terbatas
+                      </p>
+                      <p className="text-[11px] text-amber-700">
+                        Halaman pengelolaan database dan konfigurasi hanya dapat diakses melalui login resmi Admin.
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    href="/admin"
+                    className="px-3 py-1.5 rounded-xl bg-amber-600 text-white text-[11px] font-bold shrink-0"
+                  >
+                    Login Admin
+                  </Link>
+                </div>
+              )}
+
+              {globalSearchResults.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {globalSearchResults.map((res, idx) => (
+                    <Link
+                      key={idx}
+                      href={res.href}
+                      onClick={() => setSearchQuery('')}
+                      className="p-3 rounded-2xl bg-slate-50 hover:bg-indigo-50 border border-slate-200/70 hover:border-indigo-300 flex items-start justify-between gap-2 transition-all"
+                    >
+                      <div>
+                        <span className="text-[10px] font-extrabold uppercase text-indigo-600">
+                          {res.category}
+                        </span>
+                        <p className="text-xs font-bold text-slate-900 mt-0.5">{res.title}</p>
+                        <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                          {res.desc}
+                        </p>
+                      </div>
+                      <ArrowUpRight size={15} className="text-indigo-500 shrink-0 mt-1" />
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                !isSearchingAdmin && (
+                  <p className="text-xs text-slate-500 py-2 text-center">
+                    Tidak ditemukan konten untuk kata kunci <strong>"{searchQuery}"</strong>.
+                  </p>
+                )
+              )}
+            </div>
+          )}
         </header>
 
         <Suspense
           fallback={
-            <div className="h-[200px] bg-indigo-900 rounded-3xl flex items-center justify-center text-white">
-              <p className="text-indigo-200 animate-pulse font-semibold">Memuat Beranda...</p>
+            <div className="h-[240px] bg-slate-950 rounded-3xl flex items-center justify-center text-white">
+              <p className="text-slate-300 animate-pulse font-semibold">Memuat Beranda...</p>
             </div>
           }
         >
           <HeroSection onLogoLoaded={(url: string) => setNexaraLogoUrl(url)} />
         </Suspense>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
+        {/* BENTO GRID BARIS 1 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6">
           <InteractiveDonutChart
-            completion={completionPct}
-            overallScore={overallScore}
-            totalResponses={totalResponses}
+            completion={analytics.completionPct}
+            overallScore={analytics.overallScore}
+            totalResponses={analytics.totalResponses}
           />
 
-          <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between space-y-4">
+          <RadarChart7KAIH dimensions={analytics.sevenDimensions} />
+
+          <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between space-y-4 md:col-span-2 xl:col-span-1">
             <div>
-              <h3 className="font-bold text-slate-800 text-base sm:text-lg mb-1">
-                Akses Cepat Portal 7 KAIH
-              </h3>
-              <p className="text-xs text-slate-500">
-                Catat kebiasaan baik harianmu atau pantau riwayat pengisian pribadimu.
-              </p>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-slate-800 text-base sm:text-lg flex items-center gap-2">
+                  <Trophy size={18} className="text-amber-500 shrink-0" />
+                  <span>Pencapaian & Peringkat</span>
+                </h3>
+                <span className="bg-amber-50 text-amber-700 text-[11px] font-extrabold px-2.5 py-1 rounded-full border border-amber-200">
+                  {analytics.userBadge}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 mb-4">
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 p-3 rounded-2xl">
+                  <div className="flex items-center gap-1.5 text-amber-600 text-[11px] font-bold">
+                    <Flame size={14} />
+                    <span>Streak Aktif</span>
+                  </div>
+                  <p className="text-xl font-black text-slate-800 mt-1">
+                    {analytics.userStreak}{' '}
+                    <span className="text-xs font-semibold text-slate-500">Hari</span>
+                  </p>
+                </div>
+
+                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 p-3 rounded-2xl">
+                  <div className="flex items-center gap-1.5 text-indigo-600 text-[11px] font-bold">
+                    <Zap size={14} />
+                    <span>Poin XP</span>
+                  </div>
+                  <p className="text-xl font-black text-indigo-700 mt-1">
+                    {analytics.userXp.toLocaleString('id-ID')}{' '}
+                    <span className="text-xs font-semibold text-indigo-400">XP</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <Award size={13} className="text-indigo-500" />
+                  <span>Top Siswa Konsisten</span>
+                </p>
+
+                {analytics.leaderboard.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-3 text-center bg-slate-50 rounded-2xl">
+                    Belum ada data peringkat siswa.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {analytics.leaderboard.slice(0, 3).map((student, idx) => (
+                      <div
+                        key={`${student.name}-${idx}`}
+                        className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-100"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`w-5 h-5 rounded-full text-[11px] font-black flex items-center justify-center shrink-0 ${
+                              idx === 0
+                                ? 'bg-amber-400 text-white'
+                                : idx === 1
+                                ? 'bg-slate-400 text-white'
+                                : 'bg-orange-400 text-white'
+                            }`}
+                          >
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate">
+                              {student.name}
+                            </p>
+                            <p className="text-[10px] text-slate-400 truncate">{student.kelas}</p>
+                          </div>
+                        </div>
+                        <span className="text-xs font-extrabold text-indigo-600 shrink-0">
+                          {student.xp.toLocaleString('id-ID')} XP
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Link
-                href="/survey"
-                className="p-4 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 transition-all"
-              >
-                <p className="text-sm font-extrabold text-indigo-700">Isi Survei Harian →</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  Evaluasi 10 indikator kebiasaan baik skala 1–5.
-                </p>
-              </Link>
-
+            <div className="grid grid-cols-2 gap-2 pt-2">
               <Link
                 href="/statistik"
-                className="p-4 rounded-2xl bg-purple-50 hover:bg-purple-100 border border-purple-100 transition-all"
+                className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold text-xs text-center transition-all"
               >
-                <p className="text-sm font-extrabold text-purple-700">Statistik Pribadi →</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  Lihat rata-rata dan unduh rekap harianmu.
-                </p>
+                Statistik Saya
               </Link>
-
               <Link
                 href="/game"
-                className="p-4 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-100 transition-all"
+                className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs text-center transition-all shadow-xs"
               >
-                <p className="text-sm font-extrabold text-amber-700">Main Kuis Interaktif →</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  Temukan profil karakter hebatmu lewat kuis seru.
-                </p>
-              </Link>
-
-              <Link
-                href="/tentang"
-                className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-all"
-              >
-                <p className="text-sm font-extrabold text-slate-800">Tentang & Tim →</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  Profil tim pengembang Nexara SMAN 5 Semarang.
-                </p>
+                Main Kuis
               </Link>
             </div>
           </div>
@@ -383,7 +631,7 @@ export default function HomePage() {
           ) : (
             <>
               <div className="flex flex-col gap-2.5 sm:hidden border-b border-slate-100 pb-5">
-                {barAverages.map((avg, idx) => {
+                {analytics.barAverages.map((avg, idx) => {
                   const safeAvg = Math.min(5, Math.max(0, avg))
                   const widthPercent = Math.round((safeAvg / 5) * 100)
                   const isSelected = selectedBarIdx === idx
@@ -408,6 +656,7 @@ export default function HomePage() {
                           <span className="text-[10px] font-normal text-slate-400">/ 5.0</span>
                         </span>
                       </div>
+
                       <div className="w-full h-3 bg-slate-200/80 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${
@@ -424,7 +673,7 @@ export default function HomePage() {
               </div>
 
               <div className="hidden sm:grid sm:grid-cols-10 gap-2 items-end h-56 pt-6 px-1 border-b border-slate-100">
-                {barAverages.map((avg, idx) => {
+                {analytics.barAverages.map((avg, idx) => {
                   const safeAvg = Math.min(5, Math.max(0, avg))
                   const heightPercent = Math.round((safeAvg / 5) * 100)
                   const isSelected = selectedBarIdx === idx
@@ -520,7 +769,7 @@ export default function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredHabits.map((item, idx) => (
+            {habits.map((item, idx) => (
               <div key={idx} className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <h3 className="text-base font-bold text-indigo-600 mb-1.5">{item.title}</h3>
                 <p className="text-slate-600 text-xs leading-relaxed">{item.desc}</p>
