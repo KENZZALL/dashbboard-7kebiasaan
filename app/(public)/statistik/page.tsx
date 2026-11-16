@@ -1,618 +1,533 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import RadarChart7KAIH from '@/components/public/RadarChart7KAIH'
 import {
+  BarChart3,
   Search,
-  RefreshCw,
+  Sparkles,
   Calendar,
   Award,
+  CheckCircle2,
+  ArrowLeft,
   TrendingUp,
-  ClipboardCheck,
-  UserCheck,
-  AlertCircle,
-  Download,
+  User,
   Lightbulb,
-  Share2,
 } from 'lucide-react'
 
-interface StudentSubmission {
-  id: string
-  timestamp: string
-  nama: string
-  kelas: string
-  email: string
-  scores: number[]
-  rowAvg: number
-}
-
-const INDICATOR_DETAILS = [
-  { id: 1, short: 'Bangun Pagi', dimension: 'Bangun Pagi', actionTip: 'Atur alarm dan bangun pada waktu yang sama setiap hari.' },
-  { id: 2, short: 'Beribadah', dimension: 'Beribadah', actionTip: 'Luangkan waktu untuk beribadah sesuai keyakinan.' },
-  { id: 3, short: 'Berolahraga', dimension: 'Berolahraga', actionTip: 'Lakukan aktivitas fisik ringan setiap hari.' },
-  { id: 4, short: 'Makan Sehat', dimension: 'Makan Sehat dan Bergizi', actionTip: 'Pilih makanan bergizi dan minum air putih yang cukup.' },
-  { id: 5, short: 'Gemar Belajar', dimension: 'Gemar Belajar', actionTip: 'Sediakan waktu untuk membaca atau mempelajari hal baru.' },
-  { id: 6, short: 'Bermasyarakat', dimension: 'Bermasyarakat', actionTip: 'Sapa dan bantu orang-orang di lingkungan sekitar.' },
-  { id: 7, short: 'Tidur Cepat', dimension: 'Tidur Cepat', actionTip: 'Kurangi penggunaan gawai sebelum tidur dan tidur tepat waktu.' },
-  { id: 8, short: 'Kesiapan Pagi', dimension: 'Bangun Pagi', actionTip: 'Siapkan kebutuhan esok hari sejak malam.' },
-  { id: 9, short: 'Kebugaran', dimension: 'Berolahraga', actionTip: 'Biasakan bergerak aktif dalam kegiatan sehari-hari.' },
-  { id: 10, short: 'Kepedulian', dimension: 'Bermasyarakat', actionTip: 'Lakukan satu tindakan baik untuk orang lain hari ini.' },
+const SEVEN_KAIH_INDICATORS = [
+  { key: 'Bangun Pagi', short: 'Bangun Pagi', target: 3.6, tip: 'Pasang alarm pukul 05.15 dan jauhkan ponsel dari kasur agar langsung bangun.' },
+  { key: 'Beribadah', short: 'Beribadah', target: 3.6, tip: 'Jadikan waktu ibadah dan berdoa sebagai prioritas sebelum aktivitas lain.' },
+  { key: 'Berolahraga', short: 'Berolahraga', target: 3.4, tip: 'Jadwalkan aktivitas fisik atau peregangan minimal 20 menit 3 kali seminggu.' },
+  { key: 'Makan Sehat', short: 'Makan Sehat', target: 3.5, tip: 'Tambahkan minimal 1 porsi buah/sayur dan kurangi minuman manis kemasan.' },
+  { key: 'Gemar', short: 'Gemar Membaca', target: 3.5, tip: 'Luangkan 15–30 menit membaca buku literasi atau artikel edukatif setiap hari.' },
+  { key: 'Bermasyarakat', short: 'Bermasyarakat', target: 3.5, tip: 'Ambil inisiatif membantu orang tua dan peduli lingkungan sekitar.' },
+  { key: 'Tidur Cepat', short: 'Tidur Cepat', target: 3.4, tip: 'Hentikan penggunaan gadget 30 menit sebelum pukul 22.00 agar tidur tepat waktu.' },
 ]
 
+type DimensionScore = {
+  label: string
+  score: number
+  target: number
+}
+
+const INDICATOR_DETAILS = SEVEN_KAIH_INDICATORS.map((indicator) => ({
+  full: indicator.short,
+  dimension: indicator.key,
+}))
+
 function getPredicate(score: number) {
-  if (score >= 4.5) return { badge: 'Tingkat 4', label: 'Master Karakter', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
-  if (score >= 3.5) return { badge: 'Tingkat 3', label: 'Berkembang', color: 'bg-blue-50 text-blue-700 border-blue-200' }
-  if (score >= 2.5) return { badge: 'Tingkat 2', label: 'Mulai Berkembang', color: 'bg-amber-50 text-amber-700 border-amber-200' }
-  return { badge: 'Tingkat 1', label: 'Perlu Bimbingan', color: 'bg-rose-50 text-rose-700 border-rose-200' }
+  if (score >= 3.5) {
+    return { label: 'Sangat Baik', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+  }
+  if (score >= 2.5) {
+    return { label: 'Baik', color: 'bg-blue-100 text-blue-700 border-blue-200' }
+  }
+  if (score >= 1.5) {
+    return { label: 'Cukup', color: 'bg-amber-100 text-amber-700 border-amber-200' }
+  }
+  return { label: 'Perlu Peningkatan', color: 'bg-rose-100 text-rose-700 border-rose-200' }
 }
 
-function mapToSevenDimensions(scores: number[]): any {
-  const dimensions = [
-    { name: 'Bangun Pagi', indices: [0, 7] },
-    { name: 'Beribadah', indices: [1] },
-    { name: 'Berolahraga', indices: [2, 8] },
-    { name: 'Makan Sehat dan Bergizi', indices: [3] },
-    { name: 'Gemar Belajar', indices: [4] },
-    { name: 'Bermasyarakat', indices: [5, 9] },
-    { name: 'Tidur Cepat', indices: [6] },
-  ]
-  return dimensions.map(({ name, indices }) => {
-    const values = indices.map((index) => scores[index]).filter((value) => value > 0)
-    return {
-      name,
-      value: values.length
-        ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2))
-        : 0,
-    }
-  })
+type QuestionMeta = {
+  question_text: string
+  category: string
 }
 
-export default function StatistikPribadiPage() {
+function parseRowScores(row: any): number[] {
+  if (Array.isArray(row?.answers_json) && row.answers_json.length > 0) {
+    return row.answers_json.map((v: any) => Number(v) || 0)
+  }
+  if (typeof row?.answers_json === 'string') {
+    try {
+      const parsed = JSON.parse(row.answers_json)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((v: any) => Number(v) || 0)
+      }
+    } catch {}
+  }
+
+  const qKeys = Object.keys(row || {})
+    .filter((k) => /^q\d+$/i.test(k))
+    .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
+
+  if (qKeys.length > 0) {
+    return qKeys.map((k) => Number(row[k]) || 0)
+  }
+
+  return [row?.q1, row?.q2, row?.q3, row?.q4, row?.q5, row?.q6, row?.q7, row?.q8, row?.q9, row?.q10].map(
+    (v) => Number(v) || 0
+  )
+}
+
+function computeRowAverage(row: any): number {
+  const valid = parseRowScores(row).filter((v) => v >= 1 && v <= 4)
+  if (valid.length > 0) {
+    return Number((valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(2))
+  }
+  const dbAvg = Number(row?.rata_rata)
+  return !isNaN(dbAvg) && dbAvg > 0 ? Number(dbAvg.toFixed(2)) : 0
+}
+
+function mapCategoryToIndicatorIndex(category: string, fallbackIdx: number): number {
+  const lower = (category || '').toLowerCase()
+  if (lower.includes('bangun')) return 0
+  if (lower.includes('ibadah')) return 1
+  if (lower.includes('olahraga')) return 2
+  if (lower.includes('makan')) return 3
+  if (lower.includes('baca') || lower.includes('belajar')) return 4
+  if (lower.includes('masyarakat')) return 5
+  if (lower.includes('tidur')) return 6
+
+  // Fallback jika kategori kosong (pemetaan default 10 soal)
+  const defaultMap = [0, 1, 1, 2, 2, 3, 4, 5, 6, 6]
+  return defaultMap[fallbackIdx] ?? fallbackIdx % 7
+}
+
+function StatistikContent() {
   const supabase = createClient()
+  const searchParams = useSearchParams()
+  const emailFromQuery = searchParams.get('email') || ''
 
-  const [emailInput, setEmailInput] = useState('')
-  const [activeEmail, setActiveEmail] = useState('')
-  const [submissions, setSubmissions] = useState<StudentSubmission[]>([])
+  const [lookupInput, setLookupInput] = useState(emailFromQuery)
+  const [activeFilter, setActiveFilter] = useState(emailFromQuery)
+  const [rows, setRows] = useState<any[]>([])
+  const [questionMetas, setQuestionMetas] = useState<QuestionMeta[]>(
+    INDICATOR_DETAILS.map((d) => ({ question_text: d.full, category: d.dimension }))
+  )
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [errorMsg, setErrorMsg] = useState('')
 
-  const fetchStudentData = useCallback(async (targetEmail: string, isManualRefresh = false) => {
-    const cleanEmail = targetEmail.trim().toLowerCase()
-    if (!cleanEmail) {
+  const loadData = useCallback(
+    async (filterVal: string) => {
+      setLoading(true)
+
+      const { data: qData } = await supabase
+        .from('survey_questions')
+        .select('question_text, category, order_index')
+        .order('order_index', { ascending: true })
+
+      if (qData && qData.length > 0) {
+        setQuestionMetas(
+          qData.map((q) => ({
+            question_text: q.question_text,
+            category: q.category || '',
+          }))
+        )
+      }
+
+      let query = supabase
+        .from('survey_responses')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      const clean = filterVal.trim().toLowerCase()
+      if (clean) {
+        if (clean.includes('@')) {
+          query = query.ilike('email', clean)
+        } else {
+          query = query.ilike('nama', `%${clean}%`)
+        }
+      }
+
+      const { data, error } = await query
+      if (!error && Array.isArray(data)) {
+        setRows(data)
+      } else {
+        setRows([])
+      }
       setLoading(false)
-      return
-    }
+    },
+    [supabase]
+  )
 
-    if (isManualRefresh) setRefreshing(true)
-    else setLoading(true)
-    setErrorMsg('')
+  useEffect(() => {
+    setLookupInput(emailFromQuery)
+    setActiveFilter(emailFromQuery)
+    loadData(emailFromQuery)
+  }, [emailFromQuery, loadData])
 
-    const { data, error } = await supabase
-      .from('survey_responses')
-      .select('*')
-      .eq('email', cleanEmail)
-      .order('created_at', { ascending: false })
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setActiveFilter(lookupInput)
+    loadData(lookupInput)
+  }
 
-    if (error) {
-      setErrorMsg('Gagal memuat data dari database: ' + error.message)
-      setLoading(false)
-      setRefreshing(false)
-      return
-    }
+  // Hitung rata-rata per 7 Indikator KAIH (dikelompokkan dari kategori soal)
+  const indicatorSums = Array(7).fill(0)
+  const indicatorCounts = Array(7).fill(0)
+  let totalRowScoreSum = 0
+  let validRowCount = 0
 
-    const mapped: StudentSubmission[] = (data || []).map((row: any) => {
-      const scores = [
-        Number(row.q1) || 0,
-        Number(row.q2) || 0,
-        Number(row.q3) || 0,
-        Number(row.q4) || 0,
-        Number(row.q5) || 0,
-        Number(row.q6) || 0,
-        Number(row.q7) || 0,
-        Number(row.q8) || 0,
-        Number(row.q9) || 0,
-        Number(row.q10) || 0,
-      ]
-      const formattedDate = new Date(row.created_at).toLocaleString('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-
-      return {
-        id: row.id,
-        timestamp: formattedDate,
-        nama: row.nama,
-        kelas: row.kelas,
-        email: row.email,
-        scores,
-        rowAvg: Number(row.rata_rata) || 0,
+  rows.forEach((r) => {
+    const scores = parseRowScores(r)
+    scores.forEach((val: number, qIdx: number) => {
+      if (val >= 1 && val <= 4) {
+        const cat = questionMetas[qIdx]?.category || ''
+        const indIdx = mapCategoryToIndicatorIndex(cat, qIdx)
+        indicatorSums[indIdx] += val
+        indicatorCounts[indIdx] += 1
       }
     })
 
-    setSubmissions(mapped)
-    setActiveEmail(cleanEmail)
-    localStorage.setItem('kaih_student_email', cleanEmail)
-    setLoading(false)
-    setRefreshing(false)
-  }, [])
-
-  useEffect(() => {
-    const saved = localStorage.getItem('kaih_student_email') || ''
-    if (saved) {
-      setEmailInput(saved)
-      fetchStudentData(saved)
-    } else {
-      setLoading(false)
+    const rAvg = computeRowAverage(r)
+    if (rAvg > 0) {
+      totalRowScoreSum += rAvg
+      validRowCount += 1
     }
-  }, [fetchStudentData])
+  })
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!emailInput.trim()) return
-    fetchStudentData(emailInput)
-  }
-
-  const indicatorAverages = Array.from({ length: 10 }, (_, idx) => {
-    const vals = submissions
-      .map((s) => s.scores[idx])
-      .filter((v) => typeof v === 'number' && v >= 1 && v <= 5)
-    if (vals.length === 0) return 0
-    return Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2))
+  const indicatorStats = SEVEN_KAIH_INDICATORS.map((ind, idx) => {
+    const avg =
+      indicatorCounts[idx] > 0
+        ? Number((indicatorSums[idx] / indicatorCounts[idx]).toFixed(2))
+        : 0
+    return {
+      ...ind,
+      avg,
+      pct: Math.min(100, Math.round((avg / 4) * 100)),
+    }
   })
 
   const overallAverage =
-    submissions.length > 0
-      ? Number(
-          (
-            submissions.reduce((acc, item) => acc + item.rowAvg, 0) / submissions.length
-          ).toFixed(2)
-        )
-      : 0
-
-  const overallPct = Math.min(100, Math.round((overallAverage / 5) * 100))
+    validRowCount > 0 ? Number((totalRowScoreSum / validRowCount).toFixed(2)) : 0
+  const completionPct = Math.min(100, Math.round((overallAverage / 4) * 100))
   const predicate = getPredicate(overallAverage)
-  const studentProfile = submissions[0]
-  const personalDimensions = mapToSevenDimensions(indicatorAverages)
 
-  // Ambil 2 indikator terendah untuk Action Plan personal
-  const lowestTwoIndicators = INDICATOR_DETAILS.map((ind, idx) => ({
-    ...ind,
-    avg: indicatorAverages[idx] || 0,
+  const sevenDimensions: DimensionScore[] = indicatorStats.map((item) => ({
+    label: item.short,
+    score: item.avg,
+    target: item.target,
   }))
+
+  const latestStudent = rows[0]
+
+  const weakestIndicator = [...indicatorStats]
     .filter((item) => item.avg > 0)
-    .sort((a, b) => a.avg - b.avg)
-    .slice(0, 2)
-
-  // Generator Kartu Rapor Karakter PNG HD via HTML5 Canvas
-  const handleDownloadReportCardPng = () => {
-    if (!studentProfile) return
-    const canvas = document.createElement('canvas')
-    canvas.width = 900
-    canvas.height = 540
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const grad = ctx.createLinearGradient(0, 0, 900, 540)
-    grad.addColorStop(0, '#312e81')
-    grad.addColorStop(0.55, '#4f46e5')
-    grad.addColorStop(1, '#7e22ce')
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, 900, 540)
-
-    ctx.fillStyle = 'rgba(255,255,255,0.1)'
-    ctx.beginPath()
-    ctx.roundRect(40, 40, 820, 460, 28)
-    ctx.fill()
-
-    ctx.fillStyle = '#c7d2fe'
-    ctx.font = 'bold 18px sans-serif'
-    ctx.fillText('NEXARA • 7 KEBIASAAN ANAK INDONESIA HEBAT', 75, 95)
-    ctx.fillText('SMAN 5 SEMARANG', 75, 122)
-
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 36px sans-serif'
-    ctx.fillText(studentProfile.nama, 75, 195)
-
-    ctx.fillStyle = '#e0e7ff'
-    ctx.font = '22px sans-serif'
-    ctx.fillText(`Kelas ${studentProfile.kelas}  •  ${submissions.length} Hari Tercatat`, 75, 232)
-
-    ctx.fillStyle = '#fef08a'
-    ctx.font = 'bold 22px sans-serif'
-    ctx.fillText(`Predikat: ${predicate.badge} (${predicate.label})`, 75, 280)
-
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 64px sans-serif'
-    ctx.fillText(`${overallAverage.toFixed(2)}`, 75, 395)
-
-    ctx.fillStyle = '#c7d2fe'
-    ctx.font = '24px sans-serif'
-    ctx.fillText('/ 5.00 Skor Rata-Rata Karakter', 225, 395)
-
-    ctx.fillStyle = 'rgba(255,255,255,0.75)'
-    ctx.font = '16px sans-serif'
-    ctx.fillText(
-      `Dicetak pada ${new Date().toLocaleDateString('id-ID', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-      })}`,
-      75,
-      465
-    )
-
-    const link = document.createElement('a')
-    link.download = `Kartu_Karakter_7KAIH_${studentProfile.nama.replace(/\s+/g, '_')}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
-  }
-
-  const handleDownloadCsv = () => {
-    if (submissions.length === 0) return
-    const headers = [
-      'Waktu Pengisian',
-      'Nama Lengkap',
-      'Kelas',
-      'Email',
-      ...INDICATOR_DETAILS.map((n, i) => `${i + 1}. ${n.short}`),
-      'Rata-Rata',
-    ]
-    const csvRows = [
-      headers.join(','),
-      ...submissions.map((s) =>
-        [
-          `"${s.timestamp}"`,
-          `"${s.nama}"`,
-          `"${s.kelas}"`,
-          `"${s.email}"`,
-          ...s.scores,
-          s.rowAvg.toFixed(2),
-        ].join(',')
-      ),
-    ]
-    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `Rekap_7KAIH_${activeEmail}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
+    .sort((a, b) => a.avg - b.avg)[0]
 
   return (
-    <div className="min-h-screen bg-slate-50 p-3 sm:p-6 lg:p-8 font-sans">
-      <div className="max-w-5xl mx-auto space-y-5 sm:space-y-6">
-        <div className="bg-white p-5 sm:p-7 rounded-3xl shadow-sm border border-slate-100 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-                Statistik Pribadi & Rapor Karakter
+    <div className="min-h-screen bg-slate-50 py-6 px-3 sm:px-6 font-sans">
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* Top Navigation */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-white px-4 py-2.5 rounded-xl border border-slate-200/80 shadow-2xs"
+          >
+            <ArrowLeft size={14} />
+            <span>Kembali ke Beranda</span>
+          </Link>
+
+          <Link
+            href="/survey"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5 rounded-xl shadow-xs"
+          >
+            <span>+ Isi Survei Hari Ini</span>
+          </Link>
+        </div>
+
+        {/* Header & Pencarian Email / Nama */}
+        <div className="bg-gradient-to-br from-indigo-700 via-purple-700 to-indigo-900 text-white p-6 sm:p-8 rounded-3xl shadow-md space-y-5">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-xs font-bold">
+            <Sparkles size={14} className="text-amber-300" />
+            <span>Statistik & Rapor Karakter • Skala 1.0 – 4.0</span>
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="space-y-1">
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
+                {activeFilter && latestStudent
+                  ? `Statistik: ${latestStudent.nama}`
+                  : 'Statistik Kebiasaan Siswa'}
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                Rekap otomatis hasil pengisian hari ini dan hari-hari sebelumnya dari database.
+              <p className="text-xs sm:text-sm text-indigo-100">
+                {activeFilter && latestStudent
+                  ? `${latestStudent.kelas}${
+                      latestStudent.no_absen ? ` • Absen ${latestStudent.no_absen}` : ''
+                    } • ${latestStudent.email}`
+                  : 'Menampilkan rekap seluruh pengisian atau cari berdasarkan email/nama siswa (Skala 4.0).'}
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {submissions.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleDownloadReportCardPng}
-                    className="px-3.5 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Share2 size={14} />
-                    <span>Kartu Rapor PNG</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleDownloadCsv}
-                    className="px-3.5 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Download size={14} />
-                    <span>Unduh Excel</span>
-                  </button>
-                </>
-              )}
-
-              <Link
-                href="/survey"
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all"
-              >
-                + Isi Survei Hari Ini
-              </Link>
-            </div>
-          </div>
-
-          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2.5">
-            <div className="relative flex-1">
-              <Search
-                size={17}
-                className="text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"
-              />
-              <input
-                type="email"
-                required
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="Tuliskan email pribadi kalian yang dipakai saat mengisi survei"
-                className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </div>
-
-            <div className="flex gap-2">
+            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 w-full md:w-auto">
+              <div className="relative flex-1 md:w-72">
+                <Search
+                  size={15}
+                  className="text-indigo-200 absolute left-3.5 top-1/2 -translate-y-1/2"
+                />
+                <input
+                  type="text"
+                  value={lookupInput}
+                  onChange={(e) => setLookupInput(e.target.value)}
+                  placeholder="Cari email atau nama siswa..."
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/15 border border-white/20 text-xs font-semibold text-white placeholder:text-indigo-200 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                />
+              </div>
               <button
                 type="submit"
-                disabled={loading}
-                className="flex-1 sm:flex-initial px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold shadow-xs cursor-pointer"
+                className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold cursor-pointer shrink-0"
               >
-                Tampilkan Data
+                Tampilkan
               </button>
-
-              {activeEmail && (
-                <button
-                  type="button"
-                  onClick={() => fetchStudentData(activeEmail, true)}
-                  disabled={refreshing}
-                  className="px-3.5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
-                  <span className="hidden sm:inline">Muat Ulang</span>
-                </button>
-              )}
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
 
-        {errorMsg && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-2xl text-xs font-semibold flex items-center gap-2">
-            <AlertCircle size={16} className="shrink-0" />
-            <span>{errorMsg}</span>
+        {/* Kartu Ringkasan Skor */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+            <div className="h-12 w-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+              <TrendingUp size={22} />
+            </div>
+            <div>
+              <p className="text-[11px] font-extrabold uppercase text-slate-400">Rata-Rata Skor</p>
+              <p className="text-2xl font-black text-indigo-700">
+                {overallAverage.toFixed(2)}{' '}
+                <span className="text-xs font-bold text-slate-400">/ 4.0</span>
+              </p>
+            </div>
           </div>
-        )}
 
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+            <div className="h-12 w-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <CheckCircle2 size={22} />
+            </div>
+            <div>
+              <p className="text-[11px] font-extrabold uppercase text-slate-400">
+                Persentase Capaian
+              </p>
+              <p className="text-2xl font-black text-emerald-600">{completionPct}%</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+            <div className="h-12 w-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+              <Award size={22} />
+            </div>
+            <div>
+              <p className="text-[11px] font-extrabold uppercase text-slate-400">
+                Predikat ({rows.length} Entri)
+              </p>
+              <p className="text-sm font-black text-slate-800 mt-0.5">{predicate.label}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Grafik Radar & Grafik Diagram Batang Per Indikator 7 KAIH */}
         {loading ? (
           <div className="bg-white p-12 rounded-3xl border border-slate-100 text-center text-sm text-slate-400 animate-pulse">
-            Memuat riwayat pengisian...
+            Memuat statistik jawaban...
           </div>
-        ) : !activeEmail ? (
-          <div className="bg-white p-10 rounded-3xl border border-slate-100 text-center space-y-2">
-            <p className="text-base font-bold text-slate-800">
-              Masukkan Email Pribadi Kalian di Atas
+        ) : rows.length === 0 ? (
+          <div className="bg-white p-12 rounded-3xl border border-slate-100 text-center space-y-3">
+            <p className="text-sm font-bold text-slate-700">
+              Belum ada data survei yang ditemukan untuk pencarian ini.
             </p>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Gunakan email yang sama dengan yang kalian tuliskan pada formulir <strong>Yuk Survey!</strong>.
-            </p>
-          </div>
-        ) : submissions.length === 0 ? (
-          <div className="bg-white p-10 rounded-3xl border border-slate-100 text-center space-y-3">
-            <p className="text-base font-bold text-slate-800">
-              Belum Ditemukan Data untuk <span className="text-indigo-600">{activeEmail}</span>
-            </p>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Pastikan penulisan email sama persis dengan yang diisikan pada formulir survei.
-            </p>
-            <div className="pt-2">
-              <Link
-                href="/survey"
-                className="inline-block px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold"
-              >
-                Isi Survei Sekarang →
-              </Link>
-            </div>
+            <Link
+              href="/survey"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold"
+            >
+              Isi Survei Sekarang
+            </Link>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-gradient-to-br from-indigo-700 to-purple-800 text-white p-5 rounded-3xl shadow-sm flex flex-col justify-between">
-                <div className="flex items-center gap-2 text-indigo-200 text-xs font-bold">
-                  <UserCheck size={15} />
-                  <span>Profil Siswa</span>
-                </div>
-                <div className="my-3">
-                  <p className="text-lg font-extrabold truncate">{studentProfile.nama}</p>
-                  <p className="text-xs text-indigo-200 mt-0.5">
-                    Kelas {studentProfile.kelas} • {studentProfile.email}
-                  </p>
-                </div>
-                <span className="inline-block w-fit px-3 py-1 rounded-full bg-white/15 text-[11px] font-bold">
-                  {predicate.badge} • {predicate.label}
-                </span>
-              </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <RadarChart7KAIH dimensions={sevenDimensions} />
 
-              <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
-                    <TrendingUp size={15} className="text-indigo-600" />
-                    Rata-Rata Kumulatif
-                  </span>
-                  <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">
-                    {overallPct}%
+              {/* Diagram Batang Vertikal Per Indikator 7 KAIH */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between space-y-5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                      <BarChart3 size={18} className="text-indigo-600" />
+                      <span>Diagram Batang per Indikator 7 KAIH</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Rata-rata skor berdasarkan 7 kategori kebiasaan
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 shrink-0">
+                    Skala 0 – 4.0
                   </span>
                 </div>
-                <div className="my-2">
-                  <p className="text-3xl font-black text-slate-900">
-                    {overallAverage.toFixed(2)}{' '}
-                    <span className="text-sm font-semibold text-slate-400">/ 5.0</span>
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Dihitung dari seluruh {submissions.length} kali pengisian
-                  </p>
-                </div>
-              </div>
 
-              <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
-                    <ClipboardCheck size={15} className="text-emerald-600" />
-                    Total Hari / Entri
-                  </span>
-                  <Award size={18} className="text-amber-500" />
-                </div>
-                <div className="my-2">
-                  <p className="text-3xl font-black text-slate-900">
-                    {submissions.length}{' '}
-                    <span className="text-sm font-semibold text-slate-400">Catatan</span>
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Terakhir diisi: {submissions[0].timestamp}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Radar 7 Dimensi Pribadi + Rekomendasi Action Plan Otomatis */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <RadarChart7KAIH
-                dimensions={personalDimensions}
-                title="Peta Radar 7 Dimensi Pribadi"
-                subtitle="Keseimbangan kebiasaan baikmu berdasarkan seluruh riwayat"
-              />
-
-              <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between space-y-4">
-                <div>
-                  <h2 className="font-bold text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                    <Lightbulb size={19} className="text-amber-500 shrink-0" />
-                    <span>Rekomendasi Action Plan Harian</span>
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Fokus peningkatan otomatis berdasarkan 2 indikator dengan skor terendahmu:
-                  </p>
-
-                  <div className="mt-4 space-y-3">
-                    {lowestTwoIndicators.map((item) => (
+                {/* Area Plot Diagram Batang Vertikal */}
+                <div className="relative pt-6 pb-2">
+                  {/* Garis Bantu Horizontal Skala 4.0, 3.0, 2.0, 1.0 */}
+                  <div className="relative h-56 flex items-end justify-between gap-2 sm:gap-3 pl-7 pr-1 border-b-2 border-slate-200">
+                    {[4, 3, 2, 1].map((tick) => (
                       <div
-                        key={item.id}
-                        className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-1.5"
+                        key={tick}
+                        className="absolute left-0 right-0 border-t border-dashed border-slate-200/80 flex items-center pointer-events-none"
+                        style={{ bottom: `${(tick / 4) * 100}%` }}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-extrabold text-amber-800">
-                            #{item.id} {item.short} ({item.dimension})
-                          </span>
-                          <span className="text-xs font-black text-amber-700 bg-white px-2.5 py-0.5 rounded-full border border-amber-200">
-                            Skor {item.avg.toFixed(2)} / 5.0
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-700 leading-relaxed">
-                          <strong>Target Aksi:</strong> {item.actionTip}
+                        <span className="text-[10px] font-bold text-slate-400 -translate-y-2.5">
+                          {tick}.0
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* 7 Batang Indikator KAIH */}
+                    {indicatorStats.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="relative z-10 flex-1 h-full flex flex-col justify-end items-center group"
+                      >
+                        {/* Nilai Skor di Atas Batang */}
+                        <span className="mb-1.5 text-[11px] font-black text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-md">
+                          {item.avg.toFixed(2)}
+                        </span>
+
+                        {/* Batang Vertikal */}
+                        <div
+                          className="w-full max-w-[38px] rounded-t-xl bg-gradient-to-t from-indigo-600 via-indigo-500 to-purple-500 shadow-xs transition-all duration-500 group-hover:from-indigo-700 group-hover:to-purple-600"
+                          style={{ height: `${Math.max(item.pct, item.avg > 0 ? 6 : 0)}%` }}
+                          title={`${item.short}: ${item.avg.toFixed(2)} / 4.0`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Label Nama 7 Indikator di Bawah Sumbu X */}
+                  <div className="flex items-start justify-between gap-2 sm:gap-3 pl-7 pr-1 pt-2.5">
+                    {indicatorStats.map((item, idx) => (
+                      <div key={idx} className="flex-1 text-center">
+                        <p className="text-[10px] sm:text-[11px] font-extrabold text-slate-700 leading-tight break-words">
+                          {item.short}
                         </p>
                       </div>
                     ))}
                   </div>
                 </div>
-
-                <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-100 text-xs text-indigo-800">
-                  Konsistensi mengisi setiap hari akan menaikkan level predikat karaktermu menuju{' '}
-                  <strong>Master Karakter (Tingkat 4)</strong>.
-                </div>
               </div>
             </div>
 
-            <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-              <h2 className="font-bold text-slate-800 text-base sm:text-lg">
-                Rata-Rata Pribadi per Indikator (10 Kebiasaan)
+            {/* Rekomendasi Peningkatan Kebiasaan */}
+            {weakestIndicator && (
+              <div className="bg-amber-50 border border-amber-200/80 p-5 rounded-3xl flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-2xl bg-amber-400/20 text-amber-700 flex items-center justify-center shrink-0">
+                  <Lightbulb size={20} />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-extrabold uppercase tracking-wider text-amber-800">
+                    Saran Peningkatan Kebiasaan ({weakestIndicator.short} •{' '}
+                    {weakestIndicator.avg.toFixed(2)} / 4.0)
+                  </p>
+                  <p className="text-xs sm:text-sm font-medium text-amber-950 leading-relaxed">
+                    {weakestIndicator.tip}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Riwayat Pengisian Harian */}
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+              <h2 className="text-base font-extrabold text-slate-800">
+                Riwayat Pengisian ({rows.length} Sesi)
               </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-                {INDICATOR_DETAILS.map((ind, idx) => {
-                  const avg = indicatorAverages[idx] || 0
-                  const pct = Math.round((avg / 5) * 100)
+
+              <div className="space-y-3">
+                {rows.map((r) => {
+                  const rowAvg = computeRowAverage(r)
+                  const rowPct = Math.min(100, Math.round((rowAvg / 4) * 100))
+                  const rowPred = getPredicate(rowAvg)
+                  const scores = parseRowScores(r).filter((v) => v >= 1 && v <= 4)
+
                   return (
-                    <div key={ind.id} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="font-bold text-slate-700">
-                          {idx + 1}. {ind.short}
-                        </span>
-                        <span className="font-extrabold text-indigo-700">
-                          {avg.toFixed(2)} / 5.0
-                        </span>
+                    <div
+                      key={r.id}
+                      className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                            <User size={14} className="text-indigo-600" />
+                            {r.nama}
+                          </span>
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700">
+                            {r.kelas} {r.no_absen ? `• Absen ${r.no_absen}` : ''}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${rowPred.color}`}
+                          >
+                            {rowPred.label}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                          <Calendar size={12} />
+                          <span>
+                            {new Date(r.created_at).toLocaleString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                          <span>• Skor: [{scores.join(', ')}]</span>
+                        </p>
                       </div>
-                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-purple-500 transition-all duration-500"
-                          style={{ width: `${pct}%` }}
-                        />
+
+                      <div className="flex items-center gap-3 shrink-0 bg-white px-4 py-2 rounded-xl border border-slate-200">
+                        <div className="text-right">
+                          <p className="text-[10px] font-bold uppercase text-slate-400">Rata-Rata</p>
+                          <p className="text-base font-black text-indigo-700">
+                            {rowAvg.toFixed(2)}{' '}
+                            <span className="text-[11px] font-normal text-slate-400">/ 4.0</span>
+                          </p>
+                        </div>
+                        <div className="h-7 w-px bg-slate-200" />
+                        <div className="text-right">
+                          <p className="text-[10px] font-bold uppercase text-slate-400">Capaian</p>
+                          <p className="text-base font-black text-emerald-600">{rowPct}%</p>
+                        </div>
                       </div>
                     </div>
                   )
                 })}
               </div>
             </div>
-
-            <div className="bg-white p-5 sm:p-7 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-bold text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <Calendar size={18} className="text-indigo-600" />
-                  <span>Riwayat Pengisian Harian</span>
-                </h2>
-                <span className="text-xs font-bold text-slate-400">
-                  {submissions.length} Riwayat
-                </span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[640px]">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-[11px] font-extrabold uppercase text-slate-400">
-                      <th className="py-3 px-3">Waktu Pengisian</th>
-                      <th className="py-3 px-3">Rata-Rata</th>
-                      <th className="py-3 px-3">Predikat</th>
-                      <th className="py-3 px-3">Rincian Skor (1–10)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-xs">
-                    {submissions.map((sub, i) => {
-                      const rowPred = getPredicate(sub.rowAvg)
-                      return (
-                        <tr key={sub.id} className="hover:bg-slate-50/80">
-                          <td className="py-3 px-3 font-semibold text-slate-700 whitespace-nowrap">
-                            {sub.timestamp}
-                            {i === 0 && (
-                              <span className="ml-2 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">
-                                Terbaru
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3 font-black text-indigo-700">
-                            {sub.rowAvg.toFixed(2)} / 5.0
-                          </td>
-                          <td className="py-3 px-3">
-                            <span
-                              className={`px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${rowPred.color}`}
-                            >
-                              {rowPred.label}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="flex flex-wrap gap-1">
-                              {sub.scores.map((sc, sIdx) => (
-                                <span
-                                  key={sIdx}
-                                  title={INDICATOR_DETAILS[sIdx]?.short}
-                                  className="w-6 h-6 rounded-md bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-[11px]"
-                                >
-                                  {sc}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </>
         )}
       </div>
     </div>
+  )
+}
+
+export default function StatistikPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">
+          Memuat statistik pribadi...
+        </div>
+      }
+    >
+      <StatistikContent />
+    </Suspense>
   )
 }
