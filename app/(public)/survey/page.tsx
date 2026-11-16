@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import { Suspense, useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -10,6 +10,7 @@ import {
   UserCheck,
   AlertCircle,
   Loader2,
+  RefreshCw,
 } from 'lucide-react'
 
 const SCALE_LABELS: Record<number, string> = {
@@ -20,48 +21,60 @@ const SCALE_LABELS: Record<number, string> = {
 }
 
 type QuestionItem = {
+  id?: string
   question_text: string
   category: string
+  order_index: number
 }
 
 const DEFAULT_QUESTIONS: QuestionItem[] = [
   {
+    order_index: 1,
     question_text: 'Saya bangun tidur tepat waktu sebelum pukul 05.30 pagi setiap hari.',
     category: '1. Bangun Pagi',
   },
   {
+    order_index: 2,
     question_text: 'Saya menjalankan ibadah sesuai agama/kepercayaan saya tepat waktu.',
     category: '2. Beribadah',
   },
   {
+    order_index: 3,
     question_text: 'Saya berdoa sebelum dan sesudah melakukan aktivitas harian.',
     category: '2. Beribadah',
   },
   {
+    order_index: 4,
     question_text: 'Saya melakukan aktivitas olahraga fisik minimal 3 kali dalam seminggu.',
     category: '3. Berolahraga',
   },
   {
+    order_index: 5,
     question_text: 'Saya mengikuti kegiatan ekstrakurikuler atau aktivitas fisik di sekolah.',
     category: '3. Berolahraga',
   },
   {
+    order_index: 6,
     question_text: 'Saya mengonsumsi makanan sehat yang mengandung buah, sayur, atau protein.',
     category: '4. Makan Sehat & Bergizi',
   },
   {
+    order_index: 7,
     question_text: 'Saya meluangkan waktu untuk membaca buku literasi minimal 15–30 menit per hari.',
     category: '5. Gemar Membaca',
   },
   {
+    order_index: 8,
     question_text: 'Saya membantu pekerjaan rumah tangga orang tua tanpa harus diperintah.',
     category: '6. Bermasyarakat',
   },
   {
+    order_index: 9,
     question_text: 'Saya tidur malam tepat waktu sebelum pukul 22.00 agar istirahat tercukupi.',
     category: '7. Tidur Cepat',
   },
   {
+    order_index: 10,
     question_text: 'Saya tidak bermain HP/gadget secara berlebihan menjelang waktu tidur.',
     category: '7. Tidur Cepat',
   },
@@ -92,12 +105,14 @@ function SurveyFormContent() {
   const [autoFillInfo, setAutoFillInfo] = useState<string | null>(null)
   const [checkingEmail, setCheckingEmail] = useState(false)
 
-  const [questions, setQuestions] = useState<QuestionItem[]>(DEFAULT_QUESTIONS)
+  const [questions, setQuestions] = useState<QuestionItem[]>([])
+  const [loadingQuestions, setLoadingQuestions] = useState(true)
+  const [isSyncedFromAdmin, setIsSyncedFromAdmin] = useState(false)
   const [answers, setAnswers] = useState<Record<number, number>>({})
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Saat link baru dibuka: hapus jejak identitas lintas-tab di localStorage agar selalu mulai kosong
+  // Saat link baru dibuka: bersihkan sisa identitas lintas-tab di localStorage
   useEffect(() => {
     try {
       localStorage.removeItem('kaih_student_name')
@@ -107,7 +122,7 @@ function SurveyFormContent() {
     } catch {}
   }, [])
 
-  // Simpan draft pengisian per-email di sessionStorage (aktif selama tab/website belum ditutup)
+  // Simpan draft pengisian per-email di sessionStorage selama tab belum ditutup
   useEffect(() => {
     const cleanEmail = email.trim().toLowerCase()
     if (!cleanEmail || !cleanEmail.includes('@')) return
@@ -125,25 +140,56 @@ function SurveyFormContent() {
     } catch {}
   }, [email, nama, kelas, noAbsen, answers])
 
-  // Muat daftar pertanyaan dinamis beserta kategori 7 KAIH dari Supabase
-  useEffect(() => {
-    async function loadQuestions() {
-      const { data } = await supabase
-        .from('survey_questions')
-        .select('question_text, category, order_index')
-        .order('order_index', { ascending: true })
+  // Fungsi ambil soal terbaru langsung dari tabel survey_questions
+  const fetchLatestQuestions = useCallback(async () => {
+    setLoadingQuestions(true)
+    const { data, error } = await supabase
+      .from('survey_questions')
+      .select('id, question_text, category, order_index')
+      .order('order_index', { ascending: true })
 
-      if (data && data.length > 0) {
-        setQuestions(
-          data.map((q) => ({
-            question_text: q.question_text,
-            category: q.category || '1. Bangun Pagi',
-          }))
-        )
-      }
+    if (!error && data && data.length > 0) {
+      setQuestions(
+        data.map((q, idx) => ({
+          id: q.id,
+          order_index: q.order_index ?? idx + 1,
+          question_text: q.question_text,
+          category: q.category || '1. Bangun Pagi',
+        }))
+      )
+      setIsSyncedFromAdmin(true)
+    } else {
+      setQuestions(DEFAULT_QUESTIONS)
+      setIsSyncedFromAdmin(false)
     }
-    loadQuestions()
-  }, [])
+    setLoadingQuestions(false)
+  }, [supabase])
+
+  // Muat soal saat halaman dibuka, saat tab kembali aktif (focus), dan dengarkan perubahan real-time dari Admin
+  useEffect(() => {
+    fetchLatestQuestions()
+
+    const onWindowFocus = () => {
+      fetchLatestQuestions()
+    }
+    window.addEventListener('focus', onWindowFocus)
+
+    const channel = supabase
+      .channel('realtime-survey-questions')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'survey_questions' },
+        () => {
+          fetchLatestQuestions()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      window.removeEventListener('focus', onWindowFocus)
+      supabase.removeChannel(channel)
+    }
+  }, [fetchLatestQuestions, supabase])
 
   // Pulihkan identitas & jawaban saat email dimasukkan kembali selama website belum tertutup
   const handleEmailChangeAndRestore = async (rawEmail: string) => {
@@ -155,7 +201,6 @@ function SurveyFormContent() {
       return
     }
 
-    // 1. Cek sessionStorage tab aktif terlebih dahulu (jika siswa mengganti/menghapus email lalu mengetikkan email sebelumnya sebelum tab ditutup)
     try {
       const raw = sessionStorage.getItem(SESSION_VAULT_KEY)
       if (raw) {
@@ -176,7 +221,6 @@ function SurveyFormContent() {
       }
     } catch {}
 
-    // 2. Jika belum ada di draft tab ini, cek riwayat identitas di Supabase
     setCheckingEmail(true)
     const { data } = await supabase
       .from('survey_responses')
@@ -276,9 +320,23 @@ function SurveyFormContent() {
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Banner Header */}
         <div className="bg-gradient-to-br from-indigo-700 via-purple-700 to-indigo-900 text-white p-6 sm:p-8 rounded-3xl shadow-md space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-xs font-bold">
-            <Sparkles size={14} className="text-amber-300" />
-            <span>Evaluasi Harian • 7 KAIH (Skala 1–4)</span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-xs font-bold">
+              <Sparkles size={14} className="text-amber-300" />
+              <span>Evaluasi Harian • 7 KAIH (Skala 1–4)</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={fetchLatestQuestions}
+              title="Muat ulang daftar soal terbaru"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[11px] font-bold text-indigo-100 cursor-pointer"
+            >
+              <RefreshCw size={12} className={loadingQuestions ? 'animate-spin' : ''} />
+              <span>
+                {isSyncedFromAdmin ? `Soal Tersinkron (${totalQuestions} Soal)` : 'Sinkronkan Soal'}
+              </span>
+            </button>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
@@ -427,58 +485,64 @@ function SurveyFormContent() {
           </div>
 
           {/* Indikator Pertanyaan Skala 1 - 4 */}
-          <div className="space-y-4">
-            {questions.map((item, idx) => {
-              const selectedVal = answers[idx]
-              return (
-                <div
-                  key={idx}
-                  className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4"
-                >
-                  <div className="space-y-1.5">
-                    <span className="inline-block px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-extrabold uppercase tracking-wider">
-                      {item.category}
-                    </span>
-                    <div className="flex items-start gap-3">
-                      <span className="h-7 w-7 rounded-xl bg-slate-100 text-slate-700 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
-                        {idx + 1}
+          {loadingQuestions ? (
+            <div className="bg-white p-10 rounded-3xl border border-slate-100 text-center text-sm text-slate-400 animate-pulse">
+              Memuat pertanyaan terbaru dari database...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {questions.map((item, idx) => {
+                const selectedVal = answers[idx]
+                return (
+                  <div
+                    key={item.id || idx}
+                    className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4"
+                  >
+                    <div className="space-y-1.5">
+                      <span className="inline-block px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-extrabold uppercase tracking-wider">
+                        {item.category}
                       </span>
-                      <p className="text-sm sm:text-base font-bold text-slate-800 leading-relaxed">
-                        {item.question_text}
-                      </p>
+                      <div className="flex items-start gap-3">
+                        <span className="h-7 w-7 rounded-xl bg-slate-100 text-slate-700 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <p className="text-sm sm:text-base font-bold text-slate-800 leading-relaxed">
+                          {item.question_text}
+                        </p>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    {[1, 2, 3, 4].map((score) => {
-                      const active = selectedVal === score
-                      return (
-                        <button
-                          key={score}
-                          type="button"
-                          onClick={() => handleSelectScore(idx, score)}
-                          className={`py-3 px-2 rounded-2xl border text-center transition-all cursor-pointer ${
-                            active
-                              ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm scale-[1.02]'
-                              : 'bg-slate-50 border-slate-200/80 hover:border-indigo-300 text-slate-700'
-                          }`}
-                        >
-                          <div className="text-base sm:text-lg font-black">{score}</div>
-                          <div
-                            className={`text-[11px] font-bold mt-0.5 leading-tight ${
-                              active ? 'text-indigo-100' : 'text-slate-500'
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {[1, 2, 3, 4].map((score) => {
+                        const active = selectedVal === score
+                        return (
+                          <button
+                            key={score}
+                            type="button"
+                            onClick={() => handleSelectScore(idx, score)}
+                            className={`py-3 px-2 rounded-2xl border text-center transition-all cursor-pointer ${
+                              active
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm scale-[1.02]'
+                                : 'bg-slate-50 border-slate-200/80 hover:border-indigo-300 text-slate-700'
                             }`}
                           >
-                            {SCALE_LABELS[score]}
-                          </div>
-                        </button>
-                      )
-                    })}
+                            <div className="text-base sm:text-lg font-black">{score}</div>
+                            <div
+                              className={`text-[11px] font-bold mt-0.5 leading-tight ${
+                                active ? 'text-indigo-100' : 'text-slate-500'
+                              }`}
+                            >
+                              {SCALE_LABELS[score]}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
 
           {errorMsg && (
             <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
@@ -489,7 +553,7 @@ function SurveyFormContent() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || loadingQuestions}
             className="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-95 disabled:opacity-60 text-white font-extrabold text-sm sm:text-base shadow-md flex items-center justify-center gap-2 cursor-pointer"
           >
             <CheckCircle2 size={18} />

@@ -121,10 +121,6 @@ export default function AdminEditSurveyQuestionPage() {
         category: KAIH_CATEGORIES[0],
       },
     ])
-    setStatusMsg({
-      type: 'ok',
-      text: 'Slot pertanyaan baru ditambahkan. Isi teks soal, pilih kategori 7 KAIH, lalu klik Simpan.',
-    })
   }
 
   const handleDeleteQuestion = (idx: number) => {
@@ -140,7 +136,7 @@ export default function AdminEditSurveyQuestionPage() {
     setQuestions(DEFAULT_QUESTIONS)
     setStatusMsg({
       type: 'ok',
-      text: 'Teks dikembalikan ke bawaan. Klik "Simpan Perubahan" untuk menerapkan ke database.',
+      text: 'Teks dikembalikan ke bawaan. Klik "Simpan Pertanyaan" untuk menerapkan ke database.',
     })
   }
 
@@ -149,34 +145,54 @@ export default function AdminEditSurveyQuestionPage() {
     setStatusMsg(null)
 
     if (questions.some((q) => !q.question_text.trim())) {
-      setStatusMsg({ type: 'err', text: 'Semua kolom pertanyaan yang ada wajib diisi teksnya.' })
+      setStatusMsg({ type: 'err', text: 'Semua kolom pertanyaan wajib diisi teksnya.' })
       return
     }
 
     setSaving(true)
 
-    await supabase.from('survey_questions').delete().neq('order_index', -1)
+    // 1. Hapus semua baris lama di survey_questions
+    const { error: delError } = await supabase
+      .from('survey_questions')
+      .delete()
+      .gte('order_index', 0)
 
+    if (delError) {
+      setSaving(false)
+      setStatusMsg({
+        type: 'err',
+        text: `Gagal menghapus data lama: ${delError.message}`,
+      })
+      return
+    }
+
+    // 2. Simpan daftar soal & kategori baru
+    const nowIso = new Date().toISOString()
     const payload = questions.map((item, idx) => ({
       order_index: idx + 1,
       question_text: item.question_text.trim(),
       category: item.category,
+      updated_at: nowIso,
     }))
 
-    const { error } = await supabase.from('survey_questions').insert(payload)
+    const { data: insertedData, error: insError } = await supabase
+      .from('survey_questions')
+      .insert(payload)
+      .select()
+
     setSaving(false)
 
-    if (error) {
+    if (insError) {
       setStatusMsg({
         type: 'err',
-        text: `Gagal menyimpan ke database: ${error.message}`,
+        text: `Gagal menyimpan ke database: ${insError.message}`,
       })
       return
     }
 
     setStatusMsg({
       type: 'ok',
-      text: `Berhasil! ${questions.length} pertanyaan survei beserta kategori 7 KAIH telah diperbarui.`,
+      text: `Tersimpan (${insertedData?.length || questions.length} soal)! Perubahan sudah sinkron dengan halaman publik Yuk Survey.`,
     })
   }
 
@@ -196,8 +212,8 @@ export default function AdminEditSurveyQuestionPage() {
             <span>Edit Pertanyaan Survey</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Tambah, hapus, ubah teks indikator, dan tentukan kategori 7 KAIH untuk setiap soal
-            survei ({questions.length} soal aktif).
+            Tambah, hapus, ubah teks indikator, dan tentukan kategori 7 KAIH ({questions.length} soal
+            aktif).
           </p>
         </div>
 
