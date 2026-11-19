@@ -1,10 +1,22 @@
+<<<<<<< HEAD
 import type { Metadata, Viewport } from 'next'
 import { Plus_Jakarta_Sans } from 'next/font/google'
+=======
+import type { Metadata } from 'next'
+import { Plus_Jakarta_Sans, Inter } from 'next/font/google'
+>>>>>>> main
 import './globals.css'
 
-const jakarta = Plus_Jakarta_Sans({
+const plusJakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+  weight: ['600', '700', '800'],
+  variable: '--font-heading',
+})
+
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-body',
 })
 
 export const viewport: Viewport = {
@@ -14,9 +26,8 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: '7 Kebiasaan Anak Indonesia Hebat | SMAN 5 Semarang',
-  description:
-    'Dashboard evaluasi diri, statistik perkembangan, dan kuis interaktif Gerakan 7 Kebiasaan Anak Indonesia Hebat (7 KAIH) SMAN 5 Semarang.',
+  title: '7 KAIH • SMAN 5 Semarang',
+  description: 'Gerakan 7 Kebiasaan Anak Indonesia Hebat - SMAN 5 Semarang',
 }
 
 export default function RootLayout({
@@ -25,8 +36,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="id">
-      <body className={`${jakarta.className} bg-slate-50 text-slate-900 antialiased`}>
+    <html lang="id" className={`${plusJakarta.variable} ${inter.variable}`}>
+      <body className="font-sans antialiased text-[#090D16] selection:bg-indigo-600 selection:text-white">
         {children}
       </body>
     </html>

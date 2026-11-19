@@ -1,343 +1,589 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowRight, Save, LayoutGrid, Edit3, FileText, BarChart2 } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Users,
+  TrendingUp,
+  Award,
+  BarChart3,
+  Database,
+  FileSpreadsheet,
+  HelpCircle,
+  Settings,
+  RefreshCw,
+  Sunrise,
+  HeartHandshake,
+  Dumbbell,
+  Apple,
+  BookOpenCheck,
+  MoonStar,
+  Sparkles,
+  ArrowRight,
+  Clock,
+  Gamepad2,
+} from 'lucide-react'
 
-const GOOGLE_SHEET_API_URL =
-  process.env.NEXT_PUBLIC_GOOGLE_SHEET_API_URL ||
-  'https://script.google.com/macros/s/AKfycbyGCDCIQMCbgqy0l3hAjtuZs_Ed9F6xsj09cU9oxxnG72WizU_Q0sOVobnRtvYjGS5T/exec'
+const SEVEN_KAIH_INDICATORS = [
+  {
+    key: 'Bangun Pagi',
+    short: 'Bangun Pagi',
+    icon: Sunrise,
+    iconBox: 'bg-amber-100 text-amber-700 border-amber-300',
+    barGradient: 'from-amber-500 to-orange-400',
+  },
+  {
+    key: 'Beribadah',
+    short: 'Beribadah',
+    icon: HeartHandshake,
+    iconBox: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+    barGradient: 'from-emerald-600 to-teal-400',
+  },
+  {
+    key: 'Berolahraga',
+    short: 'Berolahraga',
+    icon: Dumbbell,
+    iconBox: 'bg-sky-100 text-sky-700 border-sky-300',
+    barGradient: 'from-sky-600 to-cyan-400',
+  },
+  {
+    key: 'Makan Sehat',
+    short: 'Makan Sehat',
+    icon: Apple,
+    iconBox: 'bg-rose-100 text-rose-700 border-rose-300',
+    barGradient: 'from-rose-600 to-pink-400',
+  },
+  {
+    key: 'Gemar',
+    short: 'Gemar Membaca',
+    icon: BookOpenCheck,
+    iconBox: 'bg-indigo-100 text-indigo-700 border-indigo-300',
+    barGradient: 'from-indigo-600 to-blue-500',
+  },
+  {
+    key: 'Bermasyarakat',
+    short: 'Bermasyarakat',
+    icon: Users,
+    iconBox: 'bg-orange-100 text-orange-700 border-orange-300',
+    barGradient: 'from-orange-600 to-amber-400',
+  },
+  {
+    key: 'Tidur Cepat',
+    short: 'Tidur Cepat',
+    icon: MoonStar,
+    iconBox: 'bg-violet-100 text-violet-700 border-violet-300',
+    barGradient: 'from-violet-600 to-purple-400',
+  },
+]
+
+function parseRowScores(row: any): number[] {
+  if (Array.isArray(row?.answers_json) && row.answers_json.length > 0) {
+    return row.answers_json.map((v: any) => Number(v) || 0)
+  }
+  if (typeof row?.answers_json === 'string') {
+    try {
+      const parsed = JSON.parse(row.answers_json)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((v: any) => Number(v) || 0)
+      }
+    } catch {}
+  }
+
+  const qKeys = Object.keys(row || {})
+    .filter((k) => /^q\d+$/i.test(k))
+    .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
+
+  if (qKeys.length > 0) {
+    return qKeys.map((k) => Number(row[k]) || 0)
+  }
+
+  return [row?.q1, row?.q2, row?.q3, row?.q4, row?.q5, row?.q6, row?.q7, row?.q8, row?.q9, row?.q10].map(
+    (v) => Number(v) || 0
+  )
+}
+
+function computeRowAverage(row: any): number {
+  const valid = parseRowScores(row).filter((v) => v >= 1 && v <= 4)
+  if (valid.length > 0) {
+    return Number((valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(2))
+  }
+  const dbAvg = Number(row?.rata_rata)
+  return !isNaN(dbAvg) && dbAvg > 0 ? Number(dbAvg.toFixed(2)) : 0
+}
+
+function mapCategoryToIndicatorIndex(category: string, fallbackIdx: number): number {
+  const lower = (category || '').toLowerCase()
+  if (lower.includes('bangun')) return 0
+  if (lower.includes('ibadah')) return 1
+  if (lower.includes('olahraga')) return 2
+  if (lower.includes('makan')) return 3
+  if (lower.includes('baca') || lower.includes('belajar')) return 4
+  if (lower.includes('masyarakat')) return 5
+  if (lower.includes('tidur')) return 6
+
+  const defaultMap = [0, 1, 1, 2, 2, 3, 4, 5, 6, 6]
+  return defaultMap[fallbackIdx] ?? fallbackIdx % 7
+}
 
 export default function AdminDashboardPage() {
   const supabase = createClient()
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'kelola'>('dashboard')
-  const [completion, setCompletion] = useState(0)
-  const [totalSubmissions, setTotalSubmissions] = useState(0)
-  const [uniqueStudents, setUniqueStudents] = useState(0)
+  const [rows, setRows] = useState<any[]>([])
+  const [questionCategories, setQuestionCategories] = useState<string[]>([])
+  const [totalQuizSessions, setTotalQuizSessions] = useState<number>(0)
+  const [totalBankSoal, setTotalBankSoal] = useState<number>(0)
+  const [loading, setLoading] = useState(true)
 
-  const [homeConfigId, setHomeConfigId] = useState<string | null>(null)
-  const [heroTitle, setHeroTitle] = useState('')
-  const [heroSubtitle, setHeroSubtitle] = useState('')
-  const [heroMediaUrl, setHeroMediaUrl] = useState('')
-  const [heroMediaType, setHeroMediaType] = useState<'image' | 'video'>('image')
-  const [savingHome, setSavingHome] = useState(false)
+  const loadDashboardData = useCallback(async () => {
+    setLoading(true)
+
+    const [{ data: qData }, { count: quizCount }, { count: soalCount }] = await Promise.all([
+      supabase
+        .from('survey_questions')
+        .select('category, order_index')
+        .order('order_index', { ascending: true }),
+      supabase.from('hasil_kuis').select('*', { count: 'exact', head: true }),
+      supabase.from('bank_soal').select('*', { count: 'exact', head: true }),
+    ])
+
+    if (qData && qData.length > 0) {
+      setQuestionCategories(qData.map((q) => q.category || ''))
+    }
+    if (quizCount !== null) setTotalQuizSessions(quizCount)
+    if (soalCount !== null) setTotalBankSoal(soalCount)
+
+    // Ambil seluruh data survey_responses secara bertahap (tanpa limit 1000)
+    let allResponses: any[] = []
+    let from = 0
+    const batchSize = 1000
+    let hasMore = true
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('survey_responses')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + batchSize - 1)
+
+      if (error || !data || data.length === 0) {
+        hasMore = false
+      } else {
+        allResponses = allResponses.concat(data)
+        if (data.length < batchSize) {
+          hasMore = false
+        } else {
+          from += batchSize
+        }
+      }
+    }
+
+    setRows(allResponses)
+    setLoading(false)
+  }, [supabase])
 
   useEffect(() => {
-    async function loadData() {
-      const { data: homeData } = await supabase
-        .from('home_config')
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .single()
+    loadDashboardData()
+  }, [loadDashboardData])
 
-      if (homeData) {
-        setHomeConfigId(homeData.id)
-        setHeroTitle(homeData.hero_title || '')
-        setHeroSubtitle(homeData.hero_subtitle || '')
-        setHeroMediaUrl(homeData.hero_media_url || '')
-        setHeroMediaType(homeData.hero_media_type === 'video' ? 'video' : 'image')
+  // Kalkulasi Indeks 7 KAIH Seluruh Sekolah
+  const indicatorSums = Array(7).fill(0)
+  const indicatorCounts = Array(7).fill(0)
+  let totalScoreSum = 0
+  let validScoreRows = 0
+  const classCounter: Record<string, { count: number; sum: number }> = {}
+
+  rows.forEach((r) => {
+    const scores = parseRowScores(r)
+    scores.forEach((val, qIdx) => {
+      if (val >= 1 && val <= 4) {
+        const cat = questionCategories[qIdx] || ''
+        const indIdx = mapCategoryToIndicatorIndex(cat, qIdx)
+        indicatorSums[indIdx] += val
+        indicatorCounts[indIdx] += 1
       }
+    })
 
-      try {
-        const res = await fetch(GOOGLE_SHEET_API_URL)
-        const json = await res.json()
-        if (json.status === 'success' && Array.isArray(json.data)) {
-          const rows = json.data
-          setTotalSubmissions(rows.length)
-
-          const studentSet = new Set(rows.map((r: any) => r.email || r.nama).filter(Boolean))
-          setUniqueStudents(studentSet.size)
-
-          let validSum = 0
-          let validCount = 0
-          rows.forEach((r: any) => {
-            if (Array.isArray(r.scores)) {
-              r.scores.forEach((rawVal: any) => {
-                const val = Number(rawVal)
-                if (!isNaN(val) && val >= 1 && val <= 5) {
-                  validSum += val
-                  validCount++
-                }
-              })
-            }
-          })
-
-          if (validCount > 0) {
-            const avg = validSum / validCount
-            setCompletion(Math.min(100, Math.round((avg / 5) * 100)))
-          }
-        }
-      } catch (err) {
-        console.error('Gagal mengambil statistik:', err)
-      }
+    const avg = computeRowAverage(r)
+    if (avg > 0) {
+      totalScoreSum += avg
+      validScoreRows += 1
     }
 
-    loadData()
-  }, [])
+    const kelas = (r.kelas || 'Tanpa Kelas').trim().toUpperCase()
+    if (!classCounter[kelas]) classCounter[kelas] = { count: 0, sum: 0 }
+    classCounter[kelas].count += 1
+    if (avg > 0) classCounter[kelas].sum += avg
+  })
 
-  const handleSaveHomeConfig = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSavingHome(true)
+  const schoolAverage =
+    validScoreRows > 0 ? Number((totalScoreSum / validScoreRows).toFixed(2)) : 0
 
-    const payload = {
-      hero_title: heroTitle,
-      hero_subtitle: heroSubtitle,
-      hero_media_url: heroMediaUrl,
-      hero_media_type: heroMediaType,
-      updated_at: new Date().toISOString(),
+  const indicatorStats = SEVEN_KAIH_INDICATORS.map((ind, idx) => {
+    const avg =
+      indicatorCounts[idx] > 0
+        ? Number((indicatorSums[idx] / indicatorCounts[idx]).toFixed(2))
+        : 0
+    return {
+      ...ind,
+      avg,
+      pct: Math.min(100, Math.round((avg / 4) * 100)),
     }
+  })
 
-    const { error } = homeConfigId
-      ? await supabase.from('home_config').update(payload).eq('id', homeConfigId)
-      : await supabase.from('home_config').insert([payload])
+  const topClasses = Object.entries(classCounter)
+    .map(([kelas, info]) => ({
+      kelas,
+      count: info.count,
+      avg: info.count > 0 ? Number((info.sum / info.count).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
 
-    setSavingHome(false)
-    if (!error) {
-      alert('Tampilan Beranda berhasil diperbarui!')
-      setActiveTab('dashboard')
-    } else {
-      alert('Gagal menyimpan: ' + error.message)
-    }
-  }
+  const recentSubmissions = rows.slice(0, 5)
 
   return (
-    <div className="flex bg-slate-50 min-h-screen p-5 gap-6 font-sans">
-      <aside className="w-56 bg-white rounded-3xl shadow-sm border border-slate-100 p-4 hidden md:flex flex-col shrink-0">
-        <nav className="space-y-1.5 text-sm">
-          <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl font-bold transition-all cursor-pointer ${
-              activeTab === 'dashboard'
-                ? 'bg-indigo-50 text-indigo-600'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <LayoutGrid size={16} />
-            <span>Dashboard</span>
-          </button>
+    <div className="space-y-6 font-sans text-[#090D16]">
+      {/* Hero Banner Dashboard Tunggal */}
+      <div className="rounded-3xl bg-gradient-to-r from-indigo-950 via-indigo-800 to-sky-700 text-white p-6 sm:p-8 shadow-xl border border-indigo-400/20 relative overflow-hidden">
+        <LayoutDashboard
+          size={170}
+          className="hidden sm:block absolute -bottom-8 right-6 text-white/[0.07] pointer-events-none"
+        />
 
-          <button
-            onClick={() => setActiveTab('kelola')}
-            className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl font-semibold transition-all cursor-pointer ${
-              activeTab === 'kelola'
-                ? 'bg-indigo-50 text-indigo-600 font-bold'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <Edit3 size={16} />
-            <span>Kelola Beranda</span>
-          </button>
-
-          <a
-            href="/survey"
-            className="w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl text-slate-600 hover:bg-slate-50 font-semibold"
-          >
-            <FileText size={16} />
-            <span>Survei</span>
-          </a>
-
-          <a
-            href="/statistik"
-            className="w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl text-slate-600 hover:bg-slate-50 font-semibold"
-          >
-            <BarChart2 size={16} />
-            <span>Statistik</span>
-          </a>
-
-          <div className="pt-4">
-            <a
-              href="/"
-              className="block px-4 py-2 text-xs font-bold text-indigo-600 hover:underline"
-            >
-              ← Lihat Web Publik
-            </a>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="space-y-2 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 border border-white/20 text-[11px] font-extrabold text-sky-200">
+              <Sparkles size={13} className="text-sky-300" />
+              <span>RINGKASAN ANALITIK • SMAN 5 SEMARANG</span>
+            </div>
+            <h1 className="font-heading text-2xl sm:text-3xl font-black tracking-tight text-white">
+              Dashboard Gerakan 7 KAIH
+            </h1>
+            <p className="text-xs sm:text-sm text-indigo-100 leading-relaxed">
+              Pantau rekapitulasi survei karakter siswa, rata-rata indeks 7 kebiasaan nasional, serta
+              kelola bank soal kuis dan tampilan beranda secara real-time.
+            </p>
           </div>
-        </nav>
-      </aside>
 
-      <main className="flex-1 space-y-6 min-w-0">
-        <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-500 text-white p-7 rounded-3xl shadow-md space-y-4">
-          <h2 className="text-2xl sm:text-3xl font-extrabold leading-tight">
-            Halo, Admin & Siswa SMAN 5 Semarang! 👋
-          </h2>
-          <p className="text-indigo-100 text-sm">
-            Kelola tampilan halaman utama dan pantau rekap data 7 KAIH secara langsung.
-          </p>
-          <div>
-            <a
-              href="/game"
-              className="inline-flex items-center gap-2 bg-white text-indigo-700 px-5 py-2.5 rounded-2xl font-bold text-xs sm:text-sm hover:bg-indigo-50 transition-all shadow-sm"
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={loadDashboardData}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/25 text-xs font-extrabold text-white cursor-pointer transition-all disabled:opacity-60"
             >
-              Mulai Kuis Rotasi <ArrowRight size={15} />
-            </a>
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              <span>Segarkan Data</span>
+            </button>
+
+            <Link
+              href="/admin/database"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-sky-400 to-emerald-400 hover:opacity-95 text-indigo-950 text-xs font-black shadow-md transition-all"
+            >
+              <Database size={15} />
+              <span>Buka Database Kelas</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* 4 Kartu Statistik Utama */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="bg-white/95 backdrop-blur-md p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center justify-center shrink-0">
+            <Users size={22} />
+          </div>
+          <div>
+            <p className="text-[11px] font-extrabold uppercase text-slate-600">Total Responden</p>
+            <p className="font-heading text-2xl font-black text-[#090D16]">
+              {loading ? '...' : rows.length.toLocaleString('id-ID')}
+            </p>
           </div>
         </div>
 
-        {activeTab === 'kelola' ? (
-          <form
-            onSubmit={handleSaveHomeConfig}
-            className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-5"
-          >
-            <h3 className="text-lg font-extrabold text-slate-800">Kelola & Edit Tampilan Beranda</h3>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                Judul Utama Beranda
-              </label>
-              <input
-                type="text"
-                required
-                value={heroTitle}
-                onChange={(e) => setHeroTitle(e.target.value)}
-                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                Subjudul / Deskripsi Beranda
-              </label>
-              <textarea
-                rows={3}
-                value={heroSubtitle}
-                onChange={(e) => setHeroSubtitle(e.target.value)}
-                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm"
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                  Tipe Media
-                </label>
-                <select
-                  value={heroMediaType}
-                  onChange={(e) => setHeroMediaType(e.target.value as 'image' | 'video')}
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold"
-                >
-                  <option value="image">Gambar (Image)</option>
-                  <option value="video">Video</option>
-                </select>
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                  URL Gambar / Logo Hero
-                </label>
-                <input
-                  type="text"
-                  value={heroMediaUrl}
-                  onChange={(e) => setHeroMediaUrl(e.target.value)}
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm"
-                />
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={savingHome}
-                className="inline-flex items-center gap-2 bg-indigo-600 text-white font-bold px-6 py-3 rounded-2xl text-sm cursor-pointer"
-              >
-                <Save size={16} />
-                <span>{savingHome ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('dashboard')}
-                className="px-5 py-3 rounded-2xl bg-slate-100 text-slate-700 font-bold text-sm cursor-pointer"
-              >
-                Batal
-              </button>
-            </div>
-          </form>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-lg">Progress Kebiasaan</h3>
-                  <p className="text-xs text-slate-500">Ringkasan capaian dari Spreadsheet</p>
-                </div>
-                <span className="bg-indigo-50 text-indigo-600 text-xs font-bold px-3 py-1 rounded-full">
-                  {completion}%
-                </span>
-              </div>
+        <div className="bg-white/95 backdrop-blur-md p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0">
+            <TrendingUp size={22} />
+          </div>
+          <div>
+            <p className="text-[11px] font-extrabold uppercase text-slate-600">
+              Indeks Sekolah (1–4)
+            </p>
+            <p className="font-heading text-2xl font-black text-emerald-700">
+              {loading ? '...' : schoolAverage.toFixed(2)}{' '}
+              <span className="text-xs font-bold text-slate-500">/ 4.0</span>
+            </p>
+          </div>
+        </div>
 
-              <div className="flex items-center justify-center py-4">
-                <div className="relative h-44 w-44">
-                  <div className="absolute inset-0 rounded-full bg-slate-100" />
-                  <div
-                    className="absolute inset-0 rounded-full transition-all duration-700"
-                    style={{
-                      background: `conic-gradient(#6366f1 0 ${completion}%, #e2e8f0 ${completion}% 100%)`,
-                    }}
-                  />
-                  <div className="absolute inset-4 rounded-full bg-white shadow-inner flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="text-3xl font-extrabold text-slate-800">{completion}%</div>
-                      <div className="text-[11px] text-slate-500">Tercapai</div>
+        <div className="bg-white/95 backdrop-blur-md p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl bg-sky-100 text-sky-700 border border-sky-200 flex items-center justify-center shrink-0">
+            <Gamepad2 size={22} />
+          </div>
+          <div>
+            <p className="text-[11px] font-extrabold uppercase text-slate-600">Sesi Game Kuis</p>
+            <p className="font-heading text-2xl font-black text-sky-700">
+              {loading ? '...' : totalQuizSessions.toLocaleString('id-ID')}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white/95 backdrop-blur-md p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl bg-violet-100 text-violet-700 border border-violet-200 flex items-center justify-center shrink-0">
+            <Award size={22} />
+          </div>
+          <div>
+            <p className="text-[11px] font-extrabold uppercase text-slate-600">Bank Soal Aktif</p>
+            <p className="font-heading text-2xl font-black text-violet-700">
+              {loading ? '...' : `${totalBankSoal} Soal`}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Akses Cepat Modul Pengelolaan */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <Link
+          href="/admin/database"
+          className="group p-4 rounded-2xl bg-white/95 hover:bg-indigo-50/70 border border-slate-200/90 hover:border-indigo-300 transition-all flex items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-center gap-3">
+            <span className="h-10 w-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+              <Database size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold text-[#090D16]">Database Per Kelas</p>
+              <p className="text-[11px] text-slate-600">Filter & Ekspor CSV</p>
+            </div>
+          </div>
+          <ArrowRight
+            size={16}
+            className="text-slate-400 group-hover:text-indigo-700 group-hover:translate-x-0.5 transition-all"
+          />
+        </Link>
+
+        <Link
+          href="/admin/survey"
+          className="group p-4 rounded-2xl bg-white/95 hover:bg-sky-50/70 border border-slate-200/90 hover:border-sky-300 transition-all flex items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-center gap-3">
+            <span className="h-10 w-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
+              <FileSpreadsheet size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold text-[#090D16]">Rincian Indikator</p>
+              <p className="text-[11px] text-slate-600">Matriks Skor Q1–Q10</p>
+            </div>
+          </div>
+          <ArrowRight
+            size={16}
+            className="text-slate-400 group-hover:text-sky-700 group-hover:translate-x-0.5 transition-all"
+          />
+        </Link>
+
+        <Link
+          href="/admin/soal"
+          className="group p-4 rounded-2xl bg-white/95 hover:bg-violet-50/70 border border-slate-200/90 hover:border-violet-300 transition-all flex items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-center gap-3">
+            <span className="h-10 w-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0">
+              <HelpCircle size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold text-[#090D16]">Kelola Soal Kuis</p>
+              <p className="text-[11px] text-slate-600">Tambah, Edit & Kategori</p>
+            </div>
+          </div>
+          <ArrowRight
+            size={16}
+            className="text-slate-400 group-hover:text-violet-700 group-hover:translate-x-0.5 transition-all"
+          />
+        </Link>
+
+        <Link
+          href="/admin/settings"
+          className="group p-4 rounded-2xl bg-white/95 hover:bg-emerald-50/70 border border-slate-200/90 hover:border-emerald-300 transition-all flex items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-center gap-3">
+            <span className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <Settings size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold text-[#090D16]">Pengaturan Tampilan</p>
+              <p className="text-[11px] text-slate-600">Edit Beranda Real-Time</p>
+            </div>
+          </div>
+          <ArrowRight
+            size={16}
+            className="text-slate-400 group-hover:text-emerald-700 group-hover:translate-x-0.5 transition-all"
+          />
+        </Link>
+      </div>
+
+      {/* Grafik Capaian 7 Indikator & Kelas Teraktif */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Capaian 7 Pilar Kebiasaan */}
+        <div className="lg:col-span-7 bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-heading text-base font-extrabold text-[#090D16] flex items-center gap-2">
+                <BarChart3 size={18} className="text-indigo-700" />
+                <span>Rata-Rata Capaian 7 Pilar 7 KAIH</span>
+              </h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Akumulasi skor seluruh responden SMAN 5 Semarang (Skala 1.0 – 4.0)
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3.5">
+            {indicatorStats.map((item) => {
+              const Icon = item.icon
+              return (
+                <div key={item.key} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 font-extrabold text-[#090D16]">
+                      <span
+                        className={`h-6 w-6 rounded-lg border flex items-center justify-center ${item.iconBox}`}
+                      >
+                        <Icon size={13} />
+                      </span>
+                      <span>{item.short}</span>
                     </div>
+                    <span className="font-black text-indigo-800">
+                      {item.avg.toFixed(2)}{' '}
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        ({item.pct}%)
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full bg-gradient-to-r ${item.barGradient} transition-all duration-500`}
+                      style={{ width: `${item.pct}%` }}
+                    />
                   </div>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 mt-2">
-                <div className="bg-slate-50 p-3 rounded-2xl">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Kebiasaan</p>
-                  <p className="font-bold text-slate-800 mt-1">7 dari 7</p>
-                </div>
-                <div className="bg-indigo-50 p-3 rounded-2xl">
-                  <p className="text-[10px] uppercase tracking-wide text-indigo-500">Total Rekapan</p>
-                  <p className="font-bold text-indigo-700 mt-1">{totalSubmissions} Data</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Aksi Cepat</h3>
-              <p className="text-xs text-slate-500 mb-5">
-                Akses fitur utama 7 KAIH secara langsung.
-              </p>
-              <div className="space-y-3">
-                <button
-                  onClick={() => setActiveTab('kelola')}
-                  className="block w-full p-4 bg-indigo-50 text-indigo-700 rounded-2xl font-bold text-sm text-center hover:bg-indigo-100 transition-all cursor-pointer"
-                >
-                  Kelola / Edit Beranda
-                </button>
-                <a
-                  href="/survey"
-                  className="block w-full p-4 bg-purple-50 text-purple-700 rounded-2xl font-bold text-sm text-center hover:bg-purple-100 transition-all"
-                >
-                  Isi Survei Evaluasi Diri
-                </a>
-                <a
-                  href="/statistik"
-                  className="block w-full p-4 bg-blue-50 text-blue-700 rounded-2xl font-bold text-sm text-center hover:bg-blue-100 transition-all"
-                >
-                  Lihat Statistik Siswa
-                </a>
-              </div>
-            </div>
+              )
+            })}
           </div>
-        )}
-      </main>
-
-      <aside className="w-64 space-y-6 hidden xl:block shrink-0">
-        <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-600">Total Siswa Berpartisipasi</span>
-            <span className="font-bold text-indigo-600">{uniqueStudents} Siswa</span>
-          </div>
-          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-700"
-              style={{ width: `${completion}%` }}
-            />
-          </div>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            {completion}% indeks rata-rata kebiasaan dari {totalSubmissions} rekapan Spreadsheet
-          </p>
         </div>
-      </aside>
+
+        {/* Partisipasi Kelas Terbanyak */}
+        <div className="lg:col-span-5 bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-heading text-base font-extrabold text-[#090D16]">
+                Partisipasi Kelas Teraktif
+              </h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                6 kelas dengan jumlah pengisian survei terbanyak
+              </p>
+            </div>
+            <Link
+              href="/admin/database"
+              className="text-xs font-extrabold text-indigo-700 hover:underline"
+            >
+              Semua Kelas →
+            </Link>
+          </div>
+
+          {loading ? (
+            <p className="text-xs text-slate-500 py-8 text-center animate-pulse">
+              Menghitung rekap per kelas...
+            </p>
+          ) : topClasses.length === 0 ? (
+            <p className="text-xs text-slate-500 py-8 text-center">Belum ada data kelas.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {topClasses.map((cls, idx) => (
+                <div
+                  key={cls.kelas}
+                  className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="h-7 w-7 rounded-xl bg-indigo-950 text-white text-xs font-black flex items-center justify-center">
+                      {idx + 1}
+                    </span>
+                    <div>
+                      <p className="text-xs font-extrabold text-[#090D16]">{cls.kelas}</p>
+                      <p className="text-[11px] text-slate-600">
+                        Rata-rata skor: <strong>{cls.avg.toFixed(2)}</strong> / 4.0
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full bg-indigo-100 text-indigo-900 text-xs font-black">
+                    {cls.count} Siswa
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 5 Pengisian Survei Terbaru */}
+      <div className="bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-heading text-base font-extrabold text-[#090D16] flex items-center gap-2">
+            <Clock size={18} className="text-indigo-700" />
+            <span>5 Pengisian Survei Terbaru</span>
+          </h2>
+          <Link
+            href="/admin/database"
+            className="text-xs font-extrabold text-indigo-700 hover:underline"
+          >
+            Lihat Seluruh {rows.length.toLocaleString('id-ID')} Data →
+          </Link>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 text-[11px] font-extrabold uppercase text-slate-500">
+                <th className="py-2.5 px-3">Nama Siswa</th>
+                <th className="py-2.5 px-3">Kelas</th>
+                <th className="py-2.5 px-3">Email</th>
+                <th className="py-2.5 px-3">Rata-Rata</th>
+                <th className="py-2.5 px-3">Waktu Kirim</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {recentSubmissions.map((r) => {
+                const avg = computeRowAverage(r)
+                return (
+                  <tr key={r.id} className="hover:bg-slate-50/80">
+                    <td className="py-3 px-3 font-extrabold text-[#090D16]">{r.nama}</td>
+                    <td className="py-3 px-3">
+                      <span className="px-2.5 py-0.5 rounded-md bg-indigo-100 text-indigo-900 font-extrabold">
+                        {r.kelas}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-slate-600">{r.email}</td>
+                    <td className="py-3 px-3">
+                      <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-900 font-black">
+                        {avg.toFixed(2)} / 4.0
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-slate-600">
+                      {new Date(r.created_at).toLocaleString('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }

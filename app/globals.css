@@ -1,56 +1,52 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-:root {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-jakarta: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-inter: 'Inter', system-ui, sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter);
+  color: #090d16;
+  /* Gradasi Biru Langit & Kuning Emas khas Logo SMAN 5 Semarang (SMALA) */
+  background:
+    radial-gradient(circle at 12% 14%, rgba(253, 224, 71, 0.42) 0%, transparent 42%),
+    radial-gradient(circle at 88% 18%, rgba(56, 189, 248, 0.38) 0%, transparent 46%),
+    radial-gradient(circle at 82% 85%, rgba(250, 204, 21, 0.34) 0%, transparent 45%),
+    radial-gradient(circle at 18% 88%, rgba(37, 99, 235, 0.25) 0%, transparent 48%),
+    linear-gradient(135deg, #e0f2fe 0%, #eff6ff 42%, #fef9c3 78%, #dbeafe 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
 }
 
-@keyframes pageFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+h1, h2, h3, h4, .font-heading {
+  font-family: var(--font-jakarta);
 }
 
-.animate-page-transition {
-  animation: pageFadeIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+/* Efek Blur Glossy (Frosted Glassmorphism) untuk seluruh kartu fitur */
+.kaih-glass-card {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 255, 255, 0.62) 100%
+  );
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 10px 32px -8px rgba(15, 23, 42, 0.08),
+    inset 0 1px 1px rgba(255, 255, 255, 0.95);
 }
 
-input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),
-textarea,
-select {
-  color: #0f172a !important;
-  background-color: #ffffff;
+.habit-folder-card {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.25s ease;
 }
 
-input::placeholder,
-textarea::placeholder {
-  color: #94a3b8 !important;
-  opacity: 1;
+.habit-folder-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 34px -10px rgba(30, 58, 138, 0.16);
 }
 
 /* === PENYESUAIAN RESPONSIF HANDPHONE & SEMUA GAWAI === */
@@ -78,6 +74,7 @@ textarea::placeholder {
     -webkit-overflow-scrolling: touch;
   }
 
+input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),
   /* Mencegah auto-zoom layar HP saat mengetik di kolom input/dropdown */
   input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),
   select,

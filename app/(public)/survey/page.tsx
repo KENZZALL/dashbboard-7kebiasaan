@@ -1,572 +1,400 @@
 'use client'
 
-import { Suspense, useState, useEffect, useCallback } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
+  ClipboardList,
+  Send,
   CheckCircle2,
-  ClipboardCheck,
-  Sparkles,
-  UserCheck,
   AlertCircle,
   Loader2,
-  RefreshCw,
+  GitMerge,
+  Mail,
 } from 'lucide-react'
 
-const SCALE_LABELS: Record<number, string> = {
-  1: 'Tidak Pernah',
-  2: 'Jarang',
-  3: 'Sering',
-  4: 'Setiap Saat',
-}
-
 type QuestionItem = {
-  id?: string
+  id: string
   question_text: string
   category: string
   order_index: number
 }
 
-const DEFAULT_QUESTIONS: QuestionItem[] = [
-  {
-    order_index: 1,
-    question_text: 'Saya bangun tidur tepat waktu sebelum pukul 05.30 pagi setiap hari.',
-    category: '1. Bangun Pagi',
-  },
-  {
-    order_index: 2,
-    question_text: 'Saya menjalankan ibadah sesuai agama/kepercayaan saya tepat waktu.',
-    category: '2. Beribadah',
-  },
-  {
-    order_index: 3,
-    question_text: 'Saya berdoa sebelum dan sesudah melakukan aktivitas harian.',
-    category: '2. Beribadah',
-  },
-  {
-    order_index: 4,
-    question_text: 'Saya melakukan aktivitas olahraga fisik minimal 3 kali dalam seminggu.',
-    category: '3. Berolahraga',
-  },
-  {
-    order_index: 5,
-    question_text: 'Saya mengikuti kegiatan ekstrakurikuler atau aktivitas fisik di sekolah.',
-    category: '3. Berolahraga',
-  },
-  {
-    order_index: 6,
-    question_text: 'Saya mengonsumsi makanan sehat yang mengandung buah, sayur, atau protein.',
-    category: '4. Makan Sehat & Bergizi',
-  },
-  {
-    order_index: 7,
-    question_text: 'Saya meluangkan waktu untuk membaca buku literasi minimal 15–30 menit per hari.',
-    category: '5. Gemar Membaca',
-  },
-  {
-    order_index: 8,
-    question_text: 'Saya membantu pekerjaan rumah tangga orang tua tanpa harus diperintah.',
-    category: '6. Bermasyarakat',
-  },
-  {
-    order_index: 9,
-    question_text: 'Saya tidur malam tepat waktu sebelum pukul 22.00 agar istirahat tercukupi.',
-    category: '7. Tidur Cepat',
-  },
-  {
-    order_index: 10,
-    question_text: 'Saya tidak bermain HP/gadget secara berlebihan menjelang waktu tidur.',
-    category: '7. Tidur Cepat',
-  },
+const FALLBACK_QUESTIONS: QuestionItem[] = [
+  { id: '1', question_text: 'Saya bangun pagi tepat waktu.', category: '1. Bangun Pagi', order_index: 1 },
+  { id: '2', question_text: 'Saya beribadah sesuai keyakinan.', category: '2. Beribadah', order_index: 2 },
+  { id: '3', question_text: 'Saya berolahraga secara teratur.', category: '3. Berolahraga', order_index: 3 },
+  { id: '4', question_text: 'Saya mengonsumsi makanan sehat dan bergizi.', category: '4. Makan Sehat', order_index: 4 },
+  { id: '5', question_text: 'Saya meluangkan waktu untuk membaca.', category: '5. Gemar Membaca', order_index: 5 },
+  { id: '6', question_text: 'Saya membantu orang tua dan peduli lingkungan.', category: '6. Bermasyarakat', order_index: 6 },
+  { id: '7', question_text: 'Saya beristirahat dengan cukup.', category: '7. Tidur Cepat', order_index: 7 },
+  { id: '8', question_text: 'Saya belajar dengan tekun.', category: '5. Gemar Membaca', order_index: 8 },
+  { id: '9', question_text: 'Saya berinteraksi dengan baik.', category: '6. Bermasyarakat', order_index: 9 },
+  { id: '10', question_text: 'Saya mengatur waktu dengan baik.', category: '1. Bangun Pagi', order_index: 10 },
 ]
 
 const KELAS_OPTIONS = [
-  ...Array.from({ length: 12 }, (_, i) => `X-${i + 1}`),
-  ...Array.from({ length: 12 }, (_, i) => `XI-${i + 1}`),
-  ...Array.from({ length: 12 }, (_, i) => `XII-${i + 1}`),
+  'X-1', 'X-2', 'X-3', 'X-4', 'X-5', 'X-6', 'X-7', 'X-8', 'X-9', 'X-10', 'X-11', 'X-12',
+  'XI-1', 'XI-2', 'XI-3', 'XI-4', 'XI-5', 'XI-6', 'XI-7', 'XI-8', 'XI-9', 'XI-10', 'XI-11', 'XI-12',
+  'XII-1', 'XII-2', 'XII-3', 'XII-4', 'XII-5', 'XII-6', 'XII-7', 'XII-8', 'XII-9', 'XII-10', 'XII-11', 'XII-12',
 ]
 
-const ABSEN_OPTIONS = Array.from({ length: 40 }, (_, i) => i + 1)
-const SESSION_VAULT_KEY = 'kaih_active_tab_drafts_v1'
+const SCALE_LABELS = [
+  { val: 1, label: 'Tidak Pernah / Jarang' },
+  { val: 2, label: 'Kadang-kadang' },
+  { val: 3, label: 'Sering' },
+  { val: 4, label: 'Selalu / Rutin' },
+]
 
-function SurveyFormContent() {
+// Validasi ringan agar siswa tidak mengetik email asal-asalan
+function validatePersonalEmail(email: string): string | null {
+  const clean = email.trim().toLowerCase()
+  const emailRegex = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/
+  if (!emailRegex.test(clean)) {
+    return 'Format email pribadi tidak valid. Contoh yang benar: keanu.yusuf@gmail.com'
+  }
+
+  const [localPart, domain] = clean.split('@')
+  const blockedDomains = [
+    'example.com',
+    'test.com',
+    'mailinator.com',
+    'tempmail.com',
+    '10minutemail.com',
+    'yopmail.com',
+    'guerrillamail.com',
+    'asdf.com',
+    'gmail.con',
+    'gmai.com',
+  ]
+  if (blockedDomains.includes(domain)) {
+    return 'Domain email tidak valid atau salah ketik. Gunakan email pribadi aktifmu (contoh: gmail.com).'
+  }
+
+  const junkPrefixes = ['tes', 'test', 'asd', 'asdf', 'qwe', '123', '1234', 'abc', 'anon', 'siswa', 'admin', 'dummy', 'fake']
+  if (localPart.length < 4 || junkPrefixes.includes(localPart)) {
+    return 'Mohon isi dengan alamat email pribadimu yang asli, bukan email percobaan atau asal ketik.'
+  }
+
+  return null
+}
+
+export default function StudentSurveyPage() {
   const supabase = createClient()
   const router = useRouter()
-  const searchParams = useSearchParams()
 
-  const quizResultId = searchParams.get('result_id')
-  const quizProfile = searchParams.get('profile')
+  const [emailPribadi, setEmailPribadi] = useState<string>('')
+  const [nama, setNama] = useState<string>('')
+  const [kelas, setKelas] = useState<string>('X-1')
+  const [noAbsen, setNoAbsen] = useState<string>('')
 
-  const [nama, setNama] = useState('')
-  const [kelas, setKelas] = useState('')
-  const [noAbsen, setNoAbsen] = useState('')
-  const [email, setEmail] = useState('')
-  const [autoFillInfo, setAutoFillInfo] = useState<string | null>(null)
-  const [checkingEmail, setCheckingEmail] = useState(false)
-
-  const [questions, setQuestions] = useState<QuestionItem[]>([])
-  const [loadingQuestions, setLoadingQuestions] = useState(true)
-  const [isSyncedFromAdmin, setIsSyncedFromAdmin] = useState(false)
+  const [questions, setQuestions] = useState<QuestionItem[]>(FALLBACK_QUESTIONS)
   const [answers, setAnswers] = useState<Record<number, number>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState<boolean>(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<{
+    savedEmail: string
+    mergedCount: number
+  } | null>(null)
 
-  useEffect(() => {
-    try {
-      localStorage.removeItem('kaih_student_name')
-      localStorage.removeItem('kaih_student_class')
-      localStorage.removeItem('kaih_student_absen')
-      localStorage.removeItem('kaih_student_email')
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    const cleanEmail = email.trim().toLowerCase()
-    if (!cleanEmail || !cleanEmail.includes('@')) return
-
-    try {
-      const raw = sessionStorage.getItem(SESSION_VAULT_KEY)
-      const vault = raw ? JSON.parse(raw) : {}
-      vault[cleanEmail] = {
-        nama,
-        kelas,
-        noAbsen,
-        answers,
-      }
-      sessionStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(vault))
-    } catch {}
-  }, [email, nama, kelas, noAbsen, answers])
-
-  const fetchLatestQuestions = useCallback(async () => {
-    setLoadingQuestions(true)
-    const { data, error } = await supabase
+  const loadQuestions = useCallback(async () => {
+    const { data } = await supabase
       .from('survey_questions')
-      .select('id, question_text, category, order_index')
+      .select('*')
       .order('order_index', { ascending: true })
 
-    if (!error && data && data.length > 0) {
+    if (data && data.length > 0) {
       setQuestions(
-        data.map((q, idx) => ({
-          id: q.id,
-          order_index: q.order_index ?? idx + 1,
-          question_text: q.question_text,
-          category: q.category || '1. Bangun Pagi',
+        data.map((q: Record<string, unknown>, idx: number) => ({
+          id: String(q.id || idx + 1),
+          question_text: String(q.question_text || q.pertanyaan || ''),
+          category: String(q.category || q.kategori || '7 KAIH'),
+          order_index: Number(q.order_index ?? idx + 1),
         }))
       )
-      setIsSyncedFromAdmin(true)
-    } else {
-      setQuestions(DEFAULT_QUESTIONS)
-      setIsSyncedFromAdmin(false)
     }
-    setLoadingQuestions(false)
   }, [supabase])
 
   useEffect(() => {
-    fetchLatestQuestions()
+    loadQuestions()
 
-    const onWindowFocus = () => {
-      fetchLatestQuestions()
-    }
-    window.addEventListener('focus', onWindowFocus)
-
-    const channel = supabase
-      .channel('realtime-survey-questions')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'survey_questions' },
-        () => {
-          fetchLatestQuestions()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      window.removeEventListener('focus', onWindowFocus)
-      supabase.removeChannel(channel)
-    }
-  }, [fetchLatestQuestions, supabase])
-
-  const handleEmailChangeAndRestore = async (rawEmail: string) => {
-    setEmail(rawEmail)
-    const cleanEmail = rawEmail.trim().toLowerCase()
-
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setAutoFillInfo(null)
-      return
-    }
-
-    try {
-      const raw = sessionStorage.getItem(SESSION_VAULT_KEY)
-      if (raw) {
-        const vault = JSON.parse(raw)
-        const cached = vault[cleanEmail]
-        if (cached) {
-          if (cached.nama) setNama(cached.nama)
-          if (cached.kelas) setKelas(cached.kelas)
-          if (cached.noAbsen) setNoAbsen(cached.noAbsen)
-          if (cached.answers && Object.keys(cached.answers).length > 0) {
-            setAnswers(cached.answers)
-          }
-          setAutoFillInfo(
-            `Sesi pengisian untuk ${cached.nama || cleanEmail} dipulihkan otomatis beserta jawaban yang sudah diisi.`
-          )
-          return
-        }
+    // Isi otomatis email jika siswa kebetulan sedang login
+    async function prefillUserEmail() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (user?.email) {
+        setEmailPribadi(user.email.toLowerCase())
       }
-    } catch {}
-
-    setCheckingEmail(true)
-    const { data } = await supabase
-      .from('survey_responses')
-      .select('nama, kelas, no_absen, created_at')
-      .ilike('email', cleanEmail)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (data) {
-      if (data.nama) setNama(data.nama)
-      if (data.kelas) setKelas(data.kelas)
-      if (data.no_absen) setNoAbsen(String(data.no_absen))
-      setAutoFillInfo(
-        `Identitas ditemukan: ${data.nama} (${data.kelas}${
-          data.no_absen ? ` • Absen ${data.no_absen}` : ''
-        }).`
-      )
-    } else {
-      setAutoFillInfo(null)
     }
-    setCheckingEmail(false)
-  }
+    prefillUserEmail()
+  }, [loadQuestions, supabase])
 
-  const totalQuestions = questions.length
-  const answeredCount = questions.reduce(
-    (acc, _, idx) => (answers[idx] !== undefined ? acc + 1 : acc),
-    0
-  )
-  const progressPct = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0
-
-  const handleSelectScore = (qIndex: number, val: number) => {
-    setAnswers((prev) => ({ ...prev, [qIndex]: val }))
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmitSurvey = async (e: React.FormEvent) => {
     e.preventDefault()
-    setErrorMsg(null)
+    setFormError(null)
 
-    if (!nama.trim() || !kelas || !noAbsen || !email.trim()) {
-      setErrorMsg('Harap lengkapi Email Aktif, Nama Lengkap, Kelas, dan Nomor Absen.')
+    const emailValidation = validatePersonalEmail(emailPribadi)
+    if (emailValidation) {
+      setFormError(emailValidation)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
 
-    if (answeredCount < totalQuestions) {
-      setErrorMsg(
-        `Baru ${answeredCount} dari ${totalQuestions} indikator yang terisi. Lengkapi semua terlebih dahulu.`
-      )
+    if (!nama.trim() || !kelas.trim() || !noAbsen.trim()) {
+      setFormError('Lengkapi Nama Lengkap, Kelas, dan Nomor Absen terlebih dahulu.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    if (Object.keys(answers).length < questions.length) {
+      setFormError(`Harap isi seluruh ${questions.length} indikator survei sebelum mengirim.`)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
 
     setSubmitting(true)
+    const cleanEmail = emailPribadi.trim().toLowerCase()
 
-    const scores = Array.from({ length: totalQuestions }, (_, idx) => Number(answers[idx]) || 0)
-    const cleanEmail = email.trim().toLowerCase()
-
-    // Kolom rata_rata tidak disertakan karena dihitung otomatis oleh Supabase (Generated Column)
-    const payload: Record<string, any> = {
-      nama: nama.trim(),
-      kelas,
-      no_absen: Number(noAbsen),
+    const orderedScores = questions.map((_, idx) => answers[idx] || 1)
+    const payload: Record<string, unknown> = {
       email: cleanEmail,
-      q1: scores[0] || 0,
-      q2: scores[1] || 0,
-      q3: scores[2] || 0,
-      q4: scores[3] || 0,
-      q5: scores[4] || 0,
-      q6: scores[5] || 0,
-      q7: scores[6] || 0,
-      q8: scores[7] || 0,
-      q9: scores[8] || 0,
-      q10: scores[9] || 0,
-      answers_json: scores,
+      nama: nama.trim(),
+      kelas: kelas.trim(),
+      no_absen: Number(noAbsen) || noAbsen.trim(),
+      answers_json: orderedScores,
     }
 
-    if (quizResultId) payload.quiz_result_id = quizResultId
-    if (quizProfile) payload.quiz_profile = quizProfile
+    orderedScores.forEach((score, idx) => {
+      if (idx < 10) {
+        payload[`q${idx + 1}`] = score
+      }
+    })
 
-    const { error } = await supabase.from('survey_responses').insert([payload])
+    const { error: insertError } = await supabase.from('survey_responses').insert([payload])
 
-    setSubmitting(false)
-
-    if (error) {
-      setErrorMsg(`Gagal menyimpan survei: ${error.message}`)
+    if (insertError) {
+      setFormError(`Gagal menyimpan survei: ${insertError.message}`)
+      setSubmitting(false)
       return
     }
 
-    router.push(`/statistik?email=${encodeURIComponent(cleanEmail)}`)
+    // Gabungkan otomatis seluruh riwayat lama yang memakai email berbeda berdasarkan Kelas & No. Absen
+    let mergedCount = 0
+    const { data: mergeRes } = await supabase.rpc('merge_student_survey_history', {
+      p_target_email: cleanEmail,
+      p_kelas: kelas.trim(),
+      p_no_absen: noAbsen.trim(),
+      p_nama: nama.trim(),
+    })
+
+    if (typeof mergeRes === 'number') {
+      mergedCount = mergeRes
+    }
+
+    setSubmitting(false)
+    setSubmitSuccess({ savedEmail: cleanEmail, mergedCount })
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 py-6 px-3 sm:px-6 font-sans">
-      <div className="max-w-3xl mx-auto space-y-6">
-        {/* Banner Header */}
-        <div className="bg-gradient-to-br from-indigo-700 via-purple-700 to-indigo-900 text-white p-6 sm:p-8 rounded-3xl shadow-md space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-xs font-bold">
-              <Sparkles size={14} className="text-amber-300" />
-              <span>Evaluasi Harian • 7 KAIH (Skala 1–4)</span>
-            </div>
+    <div className="max-w-4xl mx-auto space-y-6 font-sans text-[#090D16]">
+      {/* Banner Header Survei */}
+      <div className="rounded-3xl bg-gradient-to-r from-blue-950 via-blue-900 to-sky-700 text-white p-6 sm:p-8 shadow-xl border border-amber-300/25">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 border border-white/20 text-[11px] font-extrabold text-amber-300 mb-2">
+          <ClipboardList size={13} />
+          <span>INSTRUMEN REFLEKSI HARIAN 7 KAIH • SMAN 5 SEMARANG</span>
+        </div>
+        <h1 className="font-heading text-2xl sm:text-3xl font-black text-white">
+          Isi Survei Kebiasaan Hebat
+        </h1>
+        <p className="text-xs sm:text-sm text-sky-100 mt-1">
+          Isi identitas dan email pribadimu dengan konsisten agar seluruh riwayat pengisian dari awal otomatis tergabung dalam satu akun.
+        </p>
+      </div>
 
-            <button
-              type="button"
-              onClick={fetchLatestQuestions}
-              title="Muat ulang daftar soal terbaru"
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[11px] font-bold text-indigo-100 cursor-pointer"
-            >
-              <RefreshCw size={12} className={loadingQuestions ? 'animate-spin' : ''} />
-              <span>
-                {isSyncedFromAdmin ? `Soal Tersinkron (${totalQuestions} Soal)` : 'Sinkronkan Soal'}
-              </span>
-            </button>
+      {submitSuccess ? (
+        /* === TAMPILAN SUKSES SETELAH KIRIM SURVEI === */
+        <div className="kaih-glass-card p-8 rounded-3xl text-center space-y-4">
+          <div className="h-14 w-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+            <CheckCircle2 size={30} />
           </div>
-
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
-            Survei Kebiasaan Anak Indonesia Hebat
-          </h1>
-          <p className="text-xs sm:text-sm text-indigo-100 leading-relaxed">
-            Isilah dengan jujur sesuai aktivitas kalian hari ini (1 = Tidak Pernah, 2 = Jarang, 3 =
-            Sering, 4 = Setiap Saat).
+          <h2 className="font-heading text-xl font-black text-[#090D16]">
+            Survei Berhasil Disimpan!
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-700 max-w-lg mx-auto">
+            Terima kasih <strong>{nama}</strong> ({kelas}, Absen {noAbsen}). Jawabanmu telah dicatat pada email pribadi <strong>{submitSuccess.savedEmail}</strong>.
           </p>
 
-          <div className="space-y-1.5 pt-1">
-            <div className="flex justify-between text-xs font-bold text-indigo-100">
-              <span>Progres Pengisian Indikator</span>
+          {submitSuccess.mergedCount > 0 && (
+            <div className="p-4 rounded-2xl bg-amber-100/90 border border-amber-300 text-amber-950 text-xs font-extrabold max-w-lg mx-auto flex items-center justify-center gap-2">
+              <GitMerge size={16} className="text-amber-700 shrink-0" />
               <span>
-                {answeredCount} / {totalQuestions} Terisi
+                {submitSuccess.mergedCount} riwayat pengisian lamamu atas Kelas {kelas} No. Absen {noAbsen} berhasil digabungkan ke email pribadimu!
               </span>
             </div>
-            <div className="w-full h-2.5 bg-white/20 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-400 transition-all duration-300 rounded-full"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => router.push('/statistik')}
+              className="px-6 py-3 rounded-2xl bg-blue-950 text-amber-300 text-xs font-extrabold shadow-md cursor-pointer"
+            >
+              Lihat Statistik Pribadi Saya
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSubmitSuccess(null)
+                setAnswers({})
+              }}
+              className="px-5 py-3 rounded-2xl bg-white border border-slate-300 text-xs font-extrabold text-slate-800 cursor-pointer"
+            >
+              Isi Survei Lagi
+            </button>
           </div>
         </div>
-
-        {/* Form Identitas Siswa */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="bg-white p-5 sm:p-7 rounded-3xl shadow-sm border border-slate-100 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base sm:text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                <ClipboardCheck size={20} className="text-indigo-600" />
-                <span>Identitas Siswa</span>
-              </h2>
-              <span className="text-[11px] font-semibold text-slate-400">
-                Link baru dimulai bersih
-              </span>
+      ) : (
+        /* === FORMULIR IDENTITAS, EMAIL PRIBADI & 10 INDIKATOR === */
+        <form onSubmit={handleSubmitSurvey} className="space-y-5">
+          {formError && (
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-sm">
+              <AlertCircle size={18} className="text-rose-600 shrink-0" />
+              <span>{formError}</span>
             </div>
+          )}
 
-            {/* Email Aktif */}
-            <div>
-              <label className="block text-[11px] font-extrabold uppercase text-slate-500 mb-1.5">
-                Email Aktif Siswa
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => handleEmailChangeAndRestore(e.target.value)}
-                  placeholder="contoh: nama.siswa@sma.belajar.id"
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                />
-                {checkingEmail && (
-                  <Loader2
-                    size={16}
-                    className="animate-spin text-indigo-600 absolute right-4 top-1/2 -translate-y-1/2"
-                  />
-                )}
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Masukkan kembali emailmu selama halaman belum ditutup untuk memulihkan identitas &
-                isian sebelumnya.
+          {/* Identitas & Email Pribadi Siswa */}
+          <div className="kaih-glass-card p-6 rounded-3xl space-y-4">
+            <div className="border-b border-slate-200/80 pb-3">
+              <h2 className="font-heading text-base font-black text-blue-950">
+                Data Diri & Email Pribadi Siswa
+              </h2>
+              <p className="text-[11px] font-medium text-slate-600 mt-0.5">
+                Gunakan selalu <strong>email pribadi</strong> yang sama. Jika sebelumnya pernah mengisi memakai email lain, sistem otomatis menggabungkan datamu berdasarkan Kelas dan Nomor Absen.
               </p>
-
-              {autoFillInfo && (
-                <div className="mt-2.5 p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-start gap-2">
-                  <UserCheck size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-                  <span>{autoFillInfo}</span>
-                </div>
-              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-              {/* Nama Lengkap */}
               <div className="sm:col-span-6">
-                <label className="block text-[11px] font-extrabold uppercase text-slate-500 mb-1.5">
-                  Nama Lengkap Siswa
+                <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+                  Email Pribadi Siswa *
+                </label>
+                <div className="relative">
+                  <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    value={emailPribadi}
+                    onChange={(e) => setEmailPribadi(e.target.value)}
+                    placeholder="Contoh: keanu.yusuf@gmail.com"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/95 text-xs sm:text-sm font-bold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div className="sm:col-span-6">
+                <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+                  Nama Lengkap Sesuai Absen *
                 </label>
                 <input
                   type="text"
                   required
                   value={nama}
                   onChange={(e) => setNama(e.target.value)}
-                  placeholder="Masukkan nama lengkap"
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  placeholder="Contoh: Keanu Yusuf Al Ghifari"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/95 text-xs sm:text-sm font-bold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
 
-              {/* Dropdown Bergulir Kelas X-1 s.d. XII-12 */}
-              <div className="sm:col-span-3">
-                <label className="block text-[11px] font-extrabold uppercase text-slate-500 mb-1.5">
-                  Kelas
+              <div className="sm:col-span-6">
+                <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+                  Kelas *
                 </label>
                 <select
-                  required
                   value={kelas}
                   onChange={(e) => setKelas(e.target.value)}
-                  className="w-full px-3.5 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/95 text-xs sm:text-sm font-extrabold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
-                  <option value="">Pilih Kelas</option>
-                  <optgroup label="Kelas X">
-                    {KELAS_OPTIONS.filter((c) => c.startsWith('X-')).map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Kelas XI">
-                    {KELAS_OPTIONS.filter((c) => c.startsWith('XI-')).map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Kelas XII">
-                    {KELAS_OPTIONS.filter((c) => c.startsWith('XII-')).map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </div>
-
-              {/* Dropdown Bergulir No. Absen 1 s.d. 40 */}
-              <div className="sm:col-span-3">
-                <label className="block text-[11px] font-extrabold uppercase text-slate-500 mb-1.5">
-                  No. Absen
-                </label>
-                <select
-                  required
-                  value={noAbsen}
-                  onChange={(e) => setNoAbsen(e.target.value)}
-                  className="w-full px-3.5 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                >
-                  <option value="">Pilih Absen</option>
-                  {ABSEN_OPTIONS.map((num) => (
-                    <option key={num} value={num}>
-                      Absen {num}
+                  {KELAS_OPTIONS.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
                     </option>
                   ))}
                 </select>
               </div>
+
+              <div className="sm:col-span-6">
+                <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+                  Nomor Absen *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  required
+                  value={noAbsen}
+                  onChange={(e) => setNoAbsen(e.target.value)}
+                  placeholder="1–36"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/95 text-xs sm:text-sm font-extrabold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Indikator Pertanyaan Skala 1 - 4 */}
-          {loadingQuestions ? (
-            <div className="bg-white p-10 rounded-3xl border border-slate-100 text-center text-sm text-slate-400 animate-pulse">
-              Memuat pertanyaan terbaru dari database...
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {questions.map((item, idx) => {
-                const selectedVal = answers[idx]
-                return (
-                  <div
-                    key={item.id || idx}
-                    className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4"
-                  >
-                    <div className="space-y-1.5">
-                      <span className="inline-block px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-extrabold uppercase tracking-wider">
-                        {item.category}
-                      </span>
-                      <div className="flex items-start gap-3">
-                        <span className="h-7 w-7 rounded-xl bg-slate-100 text-slate-700 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
-                          {idx + 1}
-                        </span>
-                        <p className="text-sm sm:text-base font-bold text-slate-800 leading-relaxed">
-                          {item.question_text}
+          {/* Daftar Pertanyaan Q1 - Q10 */}
+          <div className="space-y-4">
+            {questions.map((q, idx) => (
+              <div key={q.id} className="kaih-glass-card p-5 sm:p-6 rounded-3xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-blue-950 text-amber-300 text-xs font-black">
+                    Q{idx + 1}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-lg bg-blue-100 text-blue-950 text-[11px] font-extrabold">
+                    {q.category}
+                  </span>
+                </div>
+
+                <p className="text-xs sm:text-sm font-bold text-[#090D16] leading-relaxed">
+                  {q.question_text}
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                  {SCALE_LABELS.map((opt) => {
+                    const selected = answers[idx] === opt.val
+                    return (
+                      <button
+                        key={opt.val}
+                        type="button"
+                        onClick={() => setAnswers((prev) => ({ ...prev, [idx]: opt.val }))}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                          selected
+                            ? 'bg-gradient-to-r from-blue-900 to-sky-700 text-white border-amber-300 shadow-md'
+                            : 'bg-white/85 hover:bg-white text-slate-800 border-slate-200'
+                        }`}
+                      >
+                        <p className={`text-xs font-black ${selected ? 'text-amber-300' : 'text-blue-900'}`}>
+                          Skor {opt.val}
                         </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                      {[1, 2, 3, 4].map((score) => {
-                        const active = selectedVal === score
-                        return (
-                          <button
-                            key={score}
-                            type="button"
-                            onClick={() => handleSelectScore(idx, score)}
-                            className={`py-3 px-2 rounded-2xl border text-center transition-all cursor-pointer ${
-                              active
-                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm scale-[1.02]'
-                                : 'bg-slate-50 border-slate-200/80 hover:border-indigo-300 text-slate-700'
-                            }`}
-                          >
-                            <div className="text-base sm:text-lg font-black">{score}</div>
-                            <div
-                              className={`text-[11px] font-bold mt-0.5 leading-tight ${
-                                active ? 'text-indigo-100' : 'text-slate-500'
-                              }`}
-                            >
-                              {SCALE_LABELS[score]}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {errorMsg && (
-            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
-              <AlertCircle size={16} className="shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
+                        <p className="text-[11px] font-bold mt-0.5 leading-snug">{opt.label}</p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
 
           <button
             type="submit"
-            disabled={submitting || loadingQuestions}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-95 disabled:opacity-60 text-white font-extrabold text-sm sm:text-base shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            disabled={submitting}
+            className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-3xl bg-gradient-to-r from-blue-950 via-blue-800 to-sky-600 text-amber-300 text-sm font-extrabold shadow-xl cursor-pointer disabled:opacity-60"
           >
-            <CheckCircle2 size={18} />
-            <span>
-              {submitting ? 'Menyimpan Jawaban...' : 'Kirim Jawaban Survei & Lihat Statistik'}
-            </span>
+            {submitting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            <span>Kirim Jawaban Survei & Gabungkan Riwayat</span>
           </button>
         </form>
-      </div>
+      )}
     </div>
-  )
-}
-
-export default function SurveyPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">
-          Memuat formulir survei...
-        </div>
-      }
-    >
-      <SurveyFormContent />
-    </Suspense>
   )
 }

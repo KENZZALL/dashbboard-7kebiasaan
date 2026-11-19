@@ -1,335 +1,418 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createClient } from '../../../../lib/supabase/client'
 import {
-  ArrowLeft,
-  Save,
-  RotateCcw,
-  CheckCircle2,
-  FileEdit,
-  AlertCircle,
+  ClipboardEdit,
   Plus,
+  Pencil,
   Trash2,
-  Tag,
+  Save,
+  X,
+  RefreshCw,
+  Sparkles,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react'
 
-export const KAIH_CATEGORIES = [
-  '1. Bangun Pagi',
-  '2. Beribadah',
-  '3. Berolahraga',
-  '4. Makan Sehat & Bergizi',
-  '5. Gemar Membaca',
-  '6. Bermasyarakat',
-  '7. Tidur Cepat',
-]
-
-type QuestionItem = {
+type QuestionRow = {
+  id: string
+  question_code: string
   question_text: string
   category: string
+  order_index: number
 }
 
-const DEFAULT_QUESTIONS: QuestionItem[] = [
-  {
-    question_text: 'Saya bangun tidur tepat waktu sebelum pukul 05.30 pagi setiap hari.',
-    category: '1. Bangun Pagi',
-  },
-  {
-    question_text: 'Saya menjalankan ibadah sesuai agama/kepercayaan saya tepat waktu.',
-    category: '2. Beribadah',
-  },
-  {
-    question_text: 'Saya berdoa sebelum dan sesudah melakukan aktivitas harian.',
-    category: '2. Beribadah',
-  },
-  {
-    question_text: 'Saya melakukan aktivitas olahraga fisik minimal 3 kali dalam seminggu.',
-    category: '3. Berolahraga',
-  },
-  {
-    question_text: 'Saya mengikuti kegiatan ekstrakurikuler atau aktivitas fisik di sekolah.',
-    category: '3. Berolahraga',
-  },
-  {
-    question_text: 'Saya mengonsumsi makanan sehat yang mengandung buah, sayur, atau protein.',
-    category: '4. Makan Sehat & Bergizi',
-  },
-  {
-    question_text: 'Saya meluangkan waktu untuk membaca buku literasi minimal 15–30 menit per hari.',
-    category: '5. Gemar Membaca',
-  },
-  {
-    question_text: 'Saya membantu pekerjaan rumah tangga orang tua tanpa harus diperintah.',
-    category: '6. Bermasyarakat',
-  },
-  {
-    question_text: 'Saya tidur malam tepat waktu sebelum pukul 22.00 agar istirahat tercukupi.',
-    category: '7. Tidur Cepat',
-  },
-  {
-    question_text: 'Saya tidak bermain HP/gadget secara berlebihan menjelang waktu tidur.',
-    category: '7. Tidur Cepat',
-  },
+const HABIT_CATEGORIES = [
+  'Bangun Pagi',
+  'Beribadah',
+  'Berolahraga',
+  'Makan Sehat',
+  'Gemar Membaca',
+  'Bermasyarakat',
+  'Tidur Cepat',
+  'Belajar',
+  'Bersosialisasi',
+  'Mengatur Waktu',
 ]
 
-export default function AdminEditSurveyQuestionPage() {
+const DEFAULT_10_QUESTIONS = [
+  { question_code: 'Q1', question_text: 'Saya bangun pagi tepat waktu.', category: 'Bangun Pagi', order_index: 1 },
+  { question_code: 'Q2', question_text: 'Saya beribadah sesuai keyakinan.', category: 'Beribadah', order_index: 2 },
+  { question_code: 'Q3', question_text: 'Saya berolahraga secara teratur.', category: 'Berolahraga', order_index: 3 },
+  { question_code: 'Q4', question_text: 'Saya mengonsumsi makanan sehat dan bergizi.', category: 'Makan Sehat', order_index: 4 },
+  { question_code: 'Q5', question_text: 'Saya meluangkan waktu untuk membaca.', category: 'Gemar Membaca', order_index: 5 },
+  { question_code: 'Q6', question_text: 'Saya membantu orang tua dan peduli lingkungan.', category: 'Bermasyarakat', order_index: 6 },
+  { question_code: 'Q7', question_text: 'Saya beristirahat dengan cukup.', category: 'Tidur Cepat', order_index: 7 },
+  { question_code: 'Q8', question_text: 'Saya belajar dengan tekun.', category: 'Belajar', order_index: 8 },
+  { question_code: 'Q9', question_text: 'Saya berinteraksi dengan baik.', category: 'Bersosialisasi', order_index: 9 },
+  { question_code: 'Q10', question_text: 'Saya mengatur waktu dengan baik.', category: 'Mengatur Waktu', order_index: 10 },
+]
+
+export default function AdminQuestionsPage() {
   const supabase = createClient()
-  const [questions, setQuestions] = useState<QuestionItem[]>(DEFAULT_QUESTIONS)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  const [questions, setQuestions] = useState<QuestionRow[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [saving, setSaving] = useState<boolean>(false)
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const editingIdRef = useRef<string | null>(null)
+  editingIdRef.current = editingId
+
+  const [codeInput, setCodeInput] = useState<string>('Q1')
+  const [categoryInput, setCategoryInput] = useState<string>('Bangun Pagi')
+  const [textInput, setTextInput] = useState<string>('')
+  const [orderInput, setOrderInput] = useState<number>(1)
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 3500)
+  }
+
+  const fetchQuestions = useCallback(async () => {
+    setLoading(true)
+
+    // Coba urutkan berdasarkan order_index; jika kolom belum ada, fallback ke select biasa
+    let { data, error } = await supabase
+      .from('survey_questions')
+      .select('*')
+      .order('order_index', { ascending: true })
+
+    if (error) {
+      const fallbackRes = await supabase.from('survey_questions').select('*')
+      data = fallbackRes.data
+      error = fallbackRes.error
+    }
+
+    if (!error && data) {
+      const normalized: QuestionRow[] = data
+        .map((row: Record<string, unknown>, idx: number) => ({
+          id: String(row.id),
+          question_code: String(row.question_code || row.code || `Q${idx + 1}`),
+          question_text: String(row.question_text || row.text || row.pertanyaan || ''),
+          category: String(row.category || row.kategori || 'Bangun Pagi'),
+          order_index: Number(row.order_index ?? idx + 1),
+        }))
+        .sort((a, b) => a.order_index - b.order_index)
+
+      setQuestions(normalized)
+
+      if (!editingIdRef.current) {
+        const nextNum = normalized.length + 1
+        setCodeInput(`Q${nextNum}`)
+        setOrderInput(nextNum)
+      }
+    }
+    setLoading(false)
+  }, [supabase])
 
   useEffect(() => {
-    async function loadQuestions() {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('survey_questions')
-        .select('question_text, category, order_index')
-        .order('order_index', { ascending: true })
+    fetchQuestions()
 
-      if (!error && data && data.length > 0) {
-        setQuestions(
-          data.map((item) => ({
-            question_text: item.question_text,
-            category: item.category || '1. Bangun Pagi',
-          }))
-        )
-      }
-      setLoading(false)
+    const channel = supabase
+      .channel('realtime-admin-questions')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'survey_questions' },
+        () => fetchQuestions()
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
     }
-    loadQuestions()
-  }, [])
+  }, [fetchQuestions, supabase])
 
-  const handleChangeText = (idx: number, val: string) => {
-    setQuestions((prev) =>
-      prev.map((item, i) => (i === idx ? { ...item, question_text: val } : item))
-    )
+  const resetForm = (nextCount = questions.length + 1) => {
+    setEditingId(null)
+    setCodeInput(`Q${nextCount}`)
+    setCategoryInput('Bangun Pagi')
+    setTextInput('')
+    setOrderInput(nextCount)
   }
 
-  const handleChangeCategory = (idx: number, category: string) => {
-    setQuestions((prev) =>
-      prev.map((item, i) => (i === idx ? { ...item, category } : item))
-    )
+  const handleEditClick = (q: QuestionRow) => {
+    setEditingId(q.id)
+    setCodeInput(q.question_code)
+    setCategoryInput(q.category)
+    setTextInput(q.question_text)
+    setOrderInput(q.order_index)
   }
 
-  const handleAddQuestion = () => {
-    setQuestions((prev) => [
-      ...prev,
-      {
-        question_text: '',
-        category: KAIH_CATEGORIES[0],
-      },
-    ])
-  }
-
-  const handleDeleteQuestion = (idx: number) => {
-    if (questions.length <= 1) {
-      setStatusMsg({ type: 'err', text: 'Minimal harus tersisa 1 pertanyaan survei.' })
-      return
+  const handleSeedDefaults = async () => {
+    setSaving(true)
+    const { error } = await supabase.from('survey_questions').insert(DEFAULT_10_QUESTIONS)
+    if (error) {
+      alert(`Gagal mengisi 10 indikator bawaan: ${error.message}`)
+    } else {
+      await fetchQuestions()
+      showToast('10 indikator survei bawaan berhasil ditambahkan!')
     }
-    setQuestions((prev) => prev.filter((_, i) => i !== idx))
+    setSaving(false)
   }
 
-  const handleResetDefault = () => {
-    if (!confirm('Kembalikan ke 10 pertanyaan bawaan 7 KAIH?')) return
-    setQuestions(DEFAULT_QUESTIONS)
-    setStatusMsg({
-      type: 'ok',
-      text: 'Teks dikembalikan ke bawaan. Klik "Simpan Pertanyaan" untuk menerapkan ke database.',
-    })
-  }
-
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setStatusMsg(null)
-
-    if (questions.some((q) => !q.question_text.trim())) {
-      setStatusMsg({ type: 'err', text: 'Semua kolom pertanyaan wajib diisi teksnya.' })
-      return
-    }
+    if (!textInput.trim()) return
 
     setSaving(true)
-
-    // 1. Hapus semua baris lama di survey_questions
-    const { error: delError } = await supabase
-      .from('survey_questions')
-      .delete()
-      .gte('order_index', 0)
-
-    if (delError) {
-      setSaving(false)
-      setStatusMsg({
-        type: 'err',
-        text: `Gagal menghapus data lama: ${delError.message}`,
-      })
-      return
+    const payload = {
+      question_code: codeInput.trim() || `Q${questions.length + 1}`,
+      question_text: textInput.trim(),
+      category: categoryInput.trim() || '7 KAIH',
+      order_index: Number(orderInput) || 1,
     }
 
-    // 2. Simpan daftar soal & kategori baru
-    const nowIso = new Date().toISOString()
-    const payload = questions.map((item, idx) => ({
-      order_index: idx + 1,
-      question_text: item.question_text.trim(),
-      category: item.category,
-      updated_at: nowIso,
-    }))
+    if (editingId) {
+      const { error } = await supabase
+        .from('survey_questions')
+        .update(payload)
+        .eq('id', editingId)
 
-    const { data: insertedData, error: insError } = await supabase
-      .from('survey_questions')
-      .insert(payload)
-      .select()
+      if (error) {
+        alert(`Gagal memperbarui pertanyaan: ${error.message}`)
+      } else {
+        await fetchQuestions()
+        resetForm(questions.length + 1)
+        showToast('Perubahan pertanyaan survei berhasil disimpan!')
+      }
+    } else {
+      const { error } = await supabase.from('survey_questions').insert([payload])
+
+      if (error) {
+        alert(`Gagal menambahkan pertanyaan: ${error.message}`)
+      } else {
+        await fetchQuestions()
+        resetForm(questions.length + 2)
+        showToast('Pertanyaan survei baru berhasil ditambahkan!')
+      }
+    }
 
     setSaving(false)
+  }
 
-    if (insError) {
-      setStatusMsg({
-        type: 'err',
-        text: `Gagal menyimpan ke database: ${insError.message}`,
-      })
-      return
+  const handleDelete = async (id: string, code: string) => {
+    if (!confirm(`Hapus pertanyaan indikator "${code}" dari survei?`)) return
+    const { error } = await supabase.from('survey_questions').delete().eq('id', id)
+    if (error) {
+      alert(`Gagal menghapus pertanyaan: ${error.message}`)
+    } else {
+      if (editingId === id) resetForm(questions.length)
+      await fetchQuestions()
+      showToast(`Pertanyaan ${code} berhasil dihapus.`)
     }
-
-    setStatusMsg({
-      type: 'ok',
-      text: `Tersimpan (${insertedData?.length || questions.length} soal)! Perubahan sudah sinkron dengan halaman publik Yuk Survey.`,
-    })
   }
 
   return (
-    <div className="p-4 sm:p-8 lg:p-10 space-y-6 font-sans max-w-4xl">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="space-y-6 font-sans text-[#090D16]">
+      {/* Banner Header */}
+      <div className="rounded-3xl bg-gradient-to-r from-blue-950 via-blue-900 to-sky-700 text-white p-6 sm:p-8 shadow-xl border border-amber-300/25 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <Link
-            href="/admin"
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 mb-2"
-          >
-            <ArrowLeft size={14} />
-            <span>Kembali ke Dashboard Admin</span>
-          </Link>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2.5">
-            <FileEdit size={26} className="text-indigo-600" />
-            <span>Edit Pertanyaan Survey</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 border border-white/20 text-[11px] font-extrabold text-amber-300 mb-2">
+            <ClipboardEdit size={13} />
+            <span>MANAJEMEN INDIKATOR & BUTIR SURVEI</span>
+          </div>
+          <h1 className="font-heading text-2xl sm:text-3xl font-black text-white">
+            Kelola Pertanyaan Survei
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Tambah, hapus, ubah teks indikator, dan tentukan kategori 7 KAIH ({questions.length} soal
-            aktif).
+          <p className="text-xs sm:text-sm text-sky-100 mt-1">
+            Tambah, ubah redaksi pernyataan indikator, serta atur kategori 7 Kebiasaan Anak Indonesia Hebat secara real-time.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleAddQuestion}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
-          >
-            <Plus size={15} />
-            <span>Tambah Soal</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleResetDefault}
-            className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
-          >
-            <RotateCcw size={14} />
-            <span>Reset Bawaan</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={fetchQuestions}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/25 text-xs font-extrabold text-white shrink-0 cursor-pointer"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <span>Segarkan Daftar</span>
+        </button>
       </div>
 
-      {statusMsg && (
-        <div
-          className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
-            statusMsg.type === 'ok'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : 'bg-rose-50 border-rose-200 text-rose-700'
-          }`}
-        >
-          {statusMsg.type === 'ok' ? (
-            <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
-          ) : (
-            <AlertCircle size={16} className="shrink-0 text-rose-600" />
-          )}
-          <span>{statusMsg.text}</span>
+      {toastMsg && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-sm">
+          <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+          <span>{toastMsg}</span>
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-4">
-        {loading ? (
-          <div className="bg-white p-10 rounded-3xl border border-slate-200/80 text-center text-sm text-slate-400 animate-pulse">
-            Memuat daftar pertanyaan dari Supabase...
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* === KOLOM KIRI: FORM TAMBAH / EDIT PERTANYAAN === */}
+        <form
+          onSubmit={handleSubmit}
+          className="lg:col-span-5 kaih-glass-card p-6 rounded-3xl space-y-4 self-start"
+        >
+          <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+            <h2 className="font-heading text-base font-black text-blue-950">
+              {editingId ? `Edit Indikator (${codeInput})` : 'Tambah Pertanyaan Baru'}
+            </h2>
+            {editingId && (
+              <button
+                type="button"
+                onClick={() => resetForm(questions.length + 1)}
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-rose-600 hover:underline cursor-pointer"
+              >
+                <X size={14} />
+                <span>Batal</span>
+              </button>
+            )}
           </div>
-        ) : (
-          questions.map((item, idx) => (
-            <div
-              key={idx}
-              className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-600">
-                  Indikator Pertanyaan #{idx + 1}
-                </span>
 
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200/70 px-2.5 py-1 rounded-xl">
-                    <Tag size={12} className="text-indigo-600 shrink-0" />
-                    <select
-                      value={item.category}
-                      onChange={(e) => handleChangeCategory(idx, e.target.value)}
-                      className="bg-transparent text-xs font-bold text-indigo-800 focus:outline-none cursor-pointer"
-                    >
-                      {KAIH_CATEGORIES.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteQuestion(idx)}
-                    title="Hapus pertanyaan ini"
-                    className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-
-              <textarea
-                rows={2}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+                Kode Indikator
+              </label>
+              <input
+                type="text"
                 required
-                placeholder="Tulis teks pertanyaan survei..."
-                value={item.question_text}
-                onChange={(e) => handleChangeText(idx, e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value)}
+                placeholder="Contoh: Q1"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/90 text-xs font-extrabold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
-          ))
-        )}
 
-        <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={handleAddQuestion}
-            className="px-4 py-3 rounded-2xl border-2 border-dashed border-indigo-300 hover:bg-indigo-50 text-indigo-700 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus size={15} />
-            <span>+ Tambah Pertanyaan Baru</span>
-          </button>
+            <div>
+              <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+                Nomor Urut
+              </label>
+              <input
+                type="number"
+                min={1}
+                required
+                value={orderInput}
+                onChange={(e) => setOrderInput(Number(e.target.value))}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/90 text-xs font-extrabold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+              Kategori Dimensi 7 KAIH
+            </label>
+            <select
+              value={categoryInput}
+              onChange={(e) => setCategoryInput(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/90 text-xs font-extrabold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
+            >
+              {HABIT_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-extrabold uppercase text-slate-700 mb-1">
+              Teks Pernyataan / Pertanyaan Survei *
+            </label>
+            <textarea
+              rows={3}
+              required
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder="Contoh: Saya bangun pagi tepat waktu sebelum pukul 05.30 WIB."
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white/90 text-xs sm:text-sm font-medium text-[#090D16] focus:outline-none focus:ring-2 focus:ring-blue-600"
+            />
+          </div>
 
           <button
             type="submit"
-            disabled={saving || loading}
-            className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-extrabold flex items-center gap-2 shadow-md cursor-pointer"
+            disabled={saving}
+            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-blue-900 via-blue-800 to-sky-600 hover:opacity-95 text-amber-300 text-xs font-extrabold shadow-md cursor-pointer disabled:opacity-60"
           >
-            <Save size={16} />
-            <span>{saving ? 'Menyimpan...' : `Simpan ${questions.length} Pertanyaan`}</span>
+            {saving ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : editingId ? (
+              <Save size={15} />
+            ) : (
+              <Plus size={15} />
+            )}
+            <span>{editingId ? 'Simpan Perubahan Indikator' : 'Tambahkan Pertanyaan'}</span>
           </button>
+        </form>
+
+        {/* === KOLOM KANAN: DAFTAR PERTANYAAN SURVEI === */}
+        <div className="lg:col-span-7 space-y-3">
+          {loading ? (
+            <div className="kaih-glass-card p-10 rounded-3xl text-center text-xs font-bold text-slate-600 animate-pulse">
+              Memuat daftar pertanyaan dari database Supabase...
+            </div>
+          ) : questions.length === 0 ? (
+            <div className="kaih-glass-card p-8 rounded-3xl text-center space-y-4">
+              <div className="space-y-1">
+                <p className="font-heading text-base font-black text-[#090D16]">
+                  Belum Ada Pertanyaan di Tabel survey_questions
+                </p>
+                <p className="text-xs text-slate-600 max-w-md mx-auto">
+                  Kamu dapat menambahkan pertanyaan satu per satu melalui formulir di samping, atau isi otomatis 10 indikator standar 7 KAIH.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSeedDefaults}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-blue-900 hover:bg-blue-800 text-amber-300 text-xs font-extrabold shadow-md cursor-pointer"
+              >
+                <Sparkles size={15} />
+                <span>Isi Otomatis 10 Indikator Standar 7 KAIH</span>
+              </button>
+            </div>
+          ) : (
+            questions.map((q) => (
+              <div
+                key={q.id}
+                className={`kaih-glass-card p-5 rounded-3xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                  editingId === q.id ? 'ring-2 ring-blue-700 bg-white/95' : ''
+                }`}
+              >
+                <div className="space-y-1.5 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-lg bg-blue-950 text-amber-300 text-[11px] font-black">
+                      {q.question_code}
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-lg bg-amber-100 text-amber-950 border border-amber-300/70 text-[11px] font-extrabold">
+                      {q.category}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      Urutan #{q.order_index}
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-sm font-bold text-[#090D16] leading-relaxed">
+                    {q.question_text}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <button
+                    type="button"
+                    onClick={() => handleEditClick(q)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/90 hover:bg-blue-50 border border-slate-300 text-xs font-extrabold text-blue-900 cursor-pointer"
+                  >
+                    <Pencil size={13} />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(q.id, q.question_code)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/90 hover:bg-rose-50 border border-slate-300 text-xs font-extrabold text-rose-700 cursor-pointer"
+                  >
+                    <Trash2 size={13} />
+                    <span>Hapus</span>
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
-      </form>
+      </div>
     </div>
   )
 }
