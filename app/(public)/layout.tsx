@@ -18,12 +18,12 @@ import {
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Beranda', icon: Home },
-  { href: '/survey', label: 'Yuk Survey!', icon: ClipboardList },
-  { href: '/game', label: 'Main Game', icon: Gamepad2 },
-  { href: '/statistik', label: 'Statistik Saya', icon: PieChart },
-  { href: '/tentang', label: 'Tentang', icon: Info },
-  { href: '/login', label: 'Admin', icon: Shield },
+  { href: '/', label: 'Beranda', mobileLabel: 'Beranda', icon: Home },
+  { href: '/survey', label: 'Yuk Survey!', mobileLabel: 'Survey', icon: ClipboardList },
+  { href: '/game', label: 'Main Game', mobileLabel: 'Game', icon: Gamepad2 },
+  { href: '/statistik', label: 'Statistik Saya', mobileLabel: 'Statistik', icon: PieChart },
+  { href: '/tentang', label: 'Tentang', mobileLabel: 'Tentang', icon: Info },
+  { href: '/login', label: 'Admin', mobileLabel: 'Admin', icon: Shield },
 ]
 
 /**
@@ -83,8 +83,8 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
   }, [supabase])
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
-      {/* Sidebar Navigasi Kiri */}
+    <div className="min-h-screen flex flex-col lg:flex-row overflow-x-hidden">
+      {/* Sidebar Navigasi Kiri (Desktop) */}
       <aside
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -93,7 +93,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         }`}
       >
         <div className="kaih-glass-card w-full h-full rounded-[2rem] py-4 px-2.5 flex flex-col justify-between overflow-hidden">
-          {/* Emblem 7 Kebiasaan Anak Indonesia Hebat: Ukuran & Sumbu Tengah 100% Sama dengan Menu (w-11 h-11) */}
+          {/* Emblem 7 Kebiasaan Anak Indonesia Hebat */}
           <Link
             href="/"
             title="7 Kebiasaan Anak Indonesia Hebat • SMAN 5 Semarang"
@@ -117,7 +117,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             )}
           </Link>
 
-          {/* Daftar Menu Navigasi (w-11 h-11 mx-auto — Segaris Vertikal Sempurna) */}
+          {/* Daftar Menu Navigasi Desktop */}
           <nav className="flex flex-col gap-2">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon
@@ -171,41 +171,49 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       </aside>
 
       {/* Konten Utama & Top Bar */}
-      <div className="flex-1 min-w-0 px-3 sm:px-6 lg:pr-7 lg:pl-2 py-4 sm:py-5 pb-24 lg:pb-8 max-w-[1440px] mx-auto w-full space-y-4">
-        {/* Top Header Bar dengan Emblem 7 KAIH */}
-        <header className="kaih-glass-card rounded-full px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-950 via-blue-800 to-sky-600 border border-amber-300/70 flex items-center justify-center shrink-0 shadow-2xs">
-              <SevenHabitsEmblem className="w-6 h-6" />
+      <div className="flex-1 min-w-0 px-3 sm:px-6 lg:pr-7 lg:pl-2 py-3.5 sm:py-5 pb-24 lg:pb-8 max-w-[1440px] mx-auto w-full space-y-4">
+        {/* Top Header Bar Responsif (HP & Desktop) */}
+        <header className="kaih-glass-card rounded-2xl sm:rounded-full px-3.5 sm:px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-3">
+          <Link href="/" className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <span className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-gradient-to-br from-blue-950 via-blue-800 to-sky-600 border border-amber-300/70 flex items-center justify-center shrink-0 shadow-2xs">
+              <SevenHabitsEmblem className="w-5 h-5 sm:w-6 sm:h-6" />
             </span>
-            <p className="text-[11px] sm:text-xs font-black tracking-wide text-slate-900 truncate">
-              SMAN 5 SEMARANG •{' '}
-              <span className="text-blue-800">7 KEBIASAAN ANAK INDONESIA HEBAT</span>
-            </p>
-          </div>
+            <div className="min-w-0">
+              <p className="text-[11px] sm:text-xs font-black tracking-wide text-slate-900 truncate leading-tight">
+                SMAN 5 SEMARANG
+              </p>
+              <p className="text-[10px] sm:text-xs font-extrabold text-blue-800 truncate leading-tight">
+                7 KEBIASAAN ANAK INDONESIA HEBAT
+              </p>
+            </div>
+          </Link>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-100/90 border border-amber-300/80 text-[11px] font-extrabold text-amber-950">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <span className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-100/90 border border-amber-300/80 text-[11px] font-extrabold text-amber-950">
               <Sparkles size={13} className="text-amber-600" />
               <span>{totalResponses.toLocaleString('id-ID')} Rekapan</span>
             </span>
 
             <Link
               href="/survey"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-gradient-to-r from-blue-900 via-blue-800 to-sky-700 hover:opacity-95 text-amber-300 text-xs font-extrabold shadow-xs transition-all"
+              className="inline-flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-gradient-to-r from-blue-900 via-blue-800 to-sky-700 hover:opacity-95 text-amber-300 text-[11px] sm:text-xs font-extrabold shadow-xs transition-all active:scale-95"
             >
-              <span>Mulai Survei</span>
-              <ArrowRight size={14} />
+              <span>Survei</span>
+              <span className="hidden sm:inline">Sekarang</span>
+              <ArrowRight size={13} />
             </Link>
           </div>
         </header>
 
         {/* Isi Halaman */}
-        <main>{children}</main>
+        <main className="w-full min-w-0">{children}</main>
       </div>
 
-      {/* Navigasi Bawah Khusus Mobile */}
-      <nav className="lg:hidden fixed bottom-3 inset-x-3 z-40 kaih-glass-card rounded-2xl px-2 py-2 flex items-center justify-around shadow-xl">
+      {/* Navigasi Bawah Khusus Mobile (6 Item Proporsional & Nyaman Disentuh) */}
+      <nav
+        aria-label="Navigasi Mobile"
+        className="lg:hidden fixed bottom-2.5 inset-x-2.5 z-40 kaih-glass-card rounded-2xl px-1.5 py-1.5 flex items-center justify-between gap-0.5 shadow-xl border border-white/80"
+      >
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon
           const isActive =
@@ -215,14 +223,16 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold transition-all ${
+              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-xl text-[9.5px] font-extrabold transition-all active:scale-95 ${
                 isActive
-                  ? 'bg-blue-900 text-amber-300'
+                  ? 'bg-gradient-to-r from-blue-900 to-sky-700 text-amber-300 shadow-xs'
                   : 'text-slate-700 hover:text-blue-900'
               }`}
             >
-              <Icon size={16} />
-              <span>{item.label}</span>
+              <Icon size={16} strokeWidth={isActive ? 2.5 : 2} className="shrink-0" />
+              <span className="truncate w-full text-center leading-tight">
+                {item.mobileLabel}
+              </span>
             </Link>
           )
         })}

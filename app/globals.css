@@ -48,3 +48,36 @@ h1, h2, h3, h4, .font-heading {
   transform: translateY(-4px);
   box-shadow: 0 16px 34px -10px rgba(30, 58, 138, 0.16);
 }
+
+/* === PENYESUAIAN RESPONSIF HANDPHONE & SEMUA GAWAI === */
+@layer base {
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Mencegah auto-zoom layar HP saat mengetik di kolom input/dropdown */
+  input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
