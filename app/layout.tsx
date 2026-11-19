@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 import type { Metadata, Viewport } from 'next'
-import { Plus_Jakarta_Sans } from 'next/font/google'
-=======
-import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans, Inter } from 'next/font/google'
->>>>>>> main
 import './globals.css'
 
 const plusJakarta = Plus_Jakarta_Sans({
