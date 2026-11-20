@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Database,
@@ -14,6 +14,12 @@ import {
   Calendar,
   XCircle,
   Sparkles,
+  CheckCircle2,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Layers,
+  List,
 } from 'lucide-react'
 
 const ALL_ORDERED_CLASSES = [
@@ -21,6 +27,8 @@ const ALL_ORDERED_CLASSES = [
   ...Array.from({ length: 12 }, (_, i) => `XI-${i + 1}`),
   ...Array.from({ length: 12 }, (_, i) => `XII-${i + 1}`),
 ]
+
+const TOTAL_ABSEN_PER_KELAS = 36
 
 function normalizeClassName(raw: string): string {
   return (raw || '')
@@ -52,6 +60,18 @@ function getRowAverage(row: any): number {
   return Number((valid.reduce((a: number, b: number) => a + b, 0) / valid.length).toFixed(2))
 }
 
+type MergedStudent = {
+  key: string
+  no_absen: number | null
+  nama: string
+  kelas: string
+  email: string
+  fillCount: number
+  combinedAverage: number
+  lastSubmittedAt: string | null
+  submissions: any[]
+}
+
 export default function AdminDatabasePage() {
   const supabase = createClient()
 
@@ -60,8 +80,11 @@ export default function AdminDatabasePage() {
   const [selectedClass, setSelectedClass] = useState<string>('ALL')
   const [selectedDate, setSelectedDate] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
+  const [viewMode, setViewMode] = useState<'MERGED' | 'RAW'>('MERGED')
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'FILLED' | 'UNFILLED'>('ALL')
+  const [expandedStudentKey, setExpandedStudentKey] = useState<string | null>(null)
 
-  // === PAGINASI LOOP >1.000 BARIS AGAR SELURUH 1.193+ DATA TAMPIL & TEREKSPOR PENUH ===
+  // === PAGINASI LOOP >1.000 BARIS AGAR SELURUH DATA TAMPIL & TEREKSPOR PENUH ===
   const fetchResponses = useCallback(async () => {
     setLoading(true)
     let allRows: any[] = []
@@ -102,56 +125,235 @@ export default function AdminDatabasePage() {
     }
   }, [fetchResponses, supabase])
 
-  const availableClasses = Array.from(
-    new Set([
-      ...ALL_ORDERED_CLASSES,
-      ...rows.map((r) => normalizeClassName(r.kelas)).filter(Boolean),
-    ])
-  ).sort(sortClassNaturally)
+  const availableClasses = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...ALL_ORDERED_CLASSES,
+          ...rows.map((r) => normalizeClassName(r.kelas)).filter(Boolean),
+        ])
+      ).sort(sortClassNaturally),
+    [rows]
+  )
 
-  const countByClass: Record<string, number> = {}
-  rows.forEach((r) => {
-    const k = normalizeClassName(r.kelas)
-    if (k) countByClass[k] = (countByClass[k] || 0) + 1
-  })
+  const dateFilteredRows = useMemo(() => {
+    if (!selectedDate) return rows
+    return rows.filter((r) => {
+      const rowDate = new Date(r.created_at).toISOString().slice(0, 10)
+      return rowDate === selectedDate
+    })
+  }, [rows, selectedDate])
 
-  const filteredRows = rows
-    .filter((r) => {
-      const rowClass = normalizeClassName(r.kelas)
-      if (selectedClass !== 'ALL' && rowClass !== selectedClass) {
-        return false
+  const uniqueFilledCountByClass = useMemo(() => {
+    const map: Record<string, Set<string>> = {}
+    dateFilteredRows.forEach((r) => {
+      const cls = normalizeClassName(r.kelas)
+      if (!cls) return
+      if (!map[cls]) map[cls] = new Set()
+      const absenNum = Number(r.no_absen)
+      const studentId =
+        absenNum >= 1 && absenNum <= 45
+          ? `ABSEN-${absenNum}`
+          : (r.email || r.nama || r.id).trim().toLowerCase()
+      map[cls].add(studentId)
+    })
+    const counts: Record<string, number> = {}
+    Object.keys(map).forEach((cls) => {
+      counts[cls] = map[cls].size
+    })
+    return counts
+  }, [dateFilteredRows])
+
+  // === PENGGABUNGAN RIWAYAT PER SISWA & PEMANTAUAN ABSEN 1-36 ===
+  const mergedStudents = useMemo(() => {
+    const classFiltered =
+      selectedClass === 'ALL'
+        ? dateFilteredRows
+        : dateFilteredRows.filter((r) => normalizeClassName(r.kelas) === selectedClass)
+
+    const grouped = new Map<string, MergedStudent>()
+
+    classFiltered.forEach((r) => {
+      const cls = normalizeClassName(r.kelas) || 'TANPA-KELAS'
+      const absenNum = Number(r.no_absen)
+      const hasValidAbsen = !isNaN(absenNum) && absenNum >= 1 && absenNum <= 45
+      const cleanEmail = (r.email || '').trim().toLowerCase()
+      const cleanName = (r.nama || 'Tanpa Nama').trim()
+
+      const key = hasValidAbsen
+        ? `${cls}::ABSEN-${absenNum}`
+        : cleanEmail
+        ? `${cls}::EMAIL-${cleanEmail}`
+        : `${cls}::NAMA-${cleanName.toLowerCase()}`
+
+      const rowAvg = getRowAverage(r)
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key,
+          no_absen: hasValidAbsen ? absenNum : null,
+          nama: cleanName,
+          kelas: cls,
+          email: r.email || '-',
+          fillCount: 1,
+          combinedAverage: rowAvg,
+          lastSubmittedAt: r.created_at,
+          submissions: [r],
+        })
+      } else {
+        const existing = grouped.get(key)!
+        existing.submissions.push(r)
+        existing.fillCount = existing.submissions.length
+
+        if (cleanName.length > existing.nama.length) {
+          existing.nama = cleanName
+        }
+        if ((!existing.email || existing.email === '-') && r.email) {
+          existing.email = r.email
+        }
+
+        const validAvgs = existing.submissions
+          .map((item) => getRowAverage(item))
+          .filter((v) => v > 0)
+        existing.combinedAverage =
+          validAvgs.length > 0
+            ? Number((validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length).toFixed(2))
+            : 0
+
+        if (
+          r.created_at &&
+          (!existing.lastSubmittedAt ||
+            new Date(r.created_at).getTime() > new Date(existing.lastSubmittedAt).getTime())
+        ) {
+          existing.lastSubmittedAt = r.created_at
+        }
       }
-      if (selectedDate) {
-        const rowDate = new Date(r.created_at).toISOString().slice(0, 10)
-        if (rowDate !== selectedDate) return false
+    })
+
+    if (selectedClass !== 'ALL') {
+      const maxAbsenInData = Array.from(grouped.values()).reduce(
+        (max, s) => (s.no_absen && s.no_absen > max ? s.no_absen : max),
+        TOTAL_ABSEN_PER_KELAS
+      )
+
+      for (let absen = 1; absen <= maxAbsenInData; absen++) {
+        const slotKey = `${selectedClass}::ABSEN-${absen}`
+        if (!grouped.has(slotKey)) {
+          grouped.set(slotKey, {
+            key: slotKey,
+            no_absen: absen,
+            nama: `Siswa Absen ${absen} (Belum Mengisi)`,
+            kelas: selectedClass,
+            email: '-',
+            fillCount: 0,
+            combinedAverage: 0,
+            lastSubmittedAt: null,
+            submissions: [],
+          })
+        }
       }
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => {
+      const clsCmp = sortClassNaturally(a.kelas, b.kelas)
+      if (clsCmp !== 0) return clsCmp
+      return (a.no_absen ?? 999) - (b.no_absen ?? 999)
+    })
+  }, [dateFilteredRows, selectedClass])
+
+  const classSummaryStats = useMemo(() => {
+    const filled = mergedStudents.filter((s) => s.fillCount > 0).length
+    const unfilled = mergedStudents.filter((s) => s.fillCount === 0).length
+    return { total: mergedStudents.length, filled, unfilled }
+  }, [mergedStudents])
+
+  const filteredMergedStudents = useMemo(() => {
+    return mergedStudents.filter((s) => {
+      if (statusFilter === 'FILLED' && s.fillCount === 0) return false
+      if (statusFilter === 'UNFILLED' && s.fillCount > 0) return false
+
       if (!searchTerm.trim()) return true
       const q = searchTerm.toLowerCase()
       return (
-        (r.nama || '').toLowerCase().includes(q) ||
-        (r.email || '').toLowerCase().includes(q) ||
-        String(r.no_absen || '').includes(q) ||
-        rowClass.toLowerCase().includes(q)
+        s.nama.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q) ||
+        String(s.no_absen || '').includes(q) ||
+        s.kelas.toLowerCase().includes(q)
       )
     })
-    .sort((a, b) => {
-      const clsCmp = sortClassNaturally(
-        normalizeClassName(a.kelas),
-        normalizeClassName(b.kelas)
-      )
-      if (clsCmp !== 0) return clsCmp
-      return (Number(a.no_absen) || 999) - (Number(b.no_absen) || 999)
-    })
+  }, [mergedStudents, statusFilter, searchTerm])
+
+  const filteredRawRows = useMemo(() => {
+    return dateFilteredRows
+      .filter((r) => {
+        const rowClass = normalizeClassName(r.kelas)
+        if (selectedClass !== 'ALL' && rowClass !== selectedClass) return false
+        if (!searchTerm.trim()) return true
+        const q = searchTerm.toLowerCase()
+        return (
+          (r.nama || '').toLowerCase().includes(q) ||
+          (r.email || '').toLowerCase().includes(q) ||
+          String(r.no_absen || '').includes(q) ||
+          rowClass.toLowerCase().includes(q)
+        )
+      })
+      .sort((a, b) => {
+        const clsCmp = sortClassNaturally(
+          normalizeClassName(a.kelas),
+          normalizeClassName(b.kelas)
+        )
+        if (clsCmp !== 0) return clsCmp
+        return (Number(a.no_absen) || 999) - (Number(b.no_absen) || 999)
+      })
+  }, [dateFilteredRows, selectedClass, searchTerm])
 
   const handleDeleteRow = async (id: string, nama: string) => {
-    if (!confirm(`Hapus data survei milik "${nama}"?`)) return
+    if (!confirm(`Hapus 1 entri survei milik "${nama}"?`)) return
     await supabase.from('survey_responses').delete().eq('id', id)
     fetchResponses()
   }
 
   const handleExportCSV = () => {
+    if (viewMode === 'MERGED') {
+      const headers = [
+        'No Absen',
+        'Nama Siswa',
+        'Kelas',
+        'Email',
+        'Status Pengisian',
+        'Jumlah Mengisi (Kali)',
+        'Rata-Rata Gabungan (Skala 4.0)',
+        'Terakhir Mengisi',
+      ]
+      const csvRows = filteredMergedStudents.map((s) => [
+        s.no_absen || '-',
+        `"${s.nama.replace(/"/g, '""')}"`,
+        s.kelas,
+        s.email,
+        s.fillCount > 0 ? `Sudah Mengisi ${s.fillCount}x` : 'Belum Mengisi',
+        s.fillCount,
+        s.fillCount > 0 ? s.combinedAverage.toFixed(2) : '0.00',
+        s.lastSubmittedAt
+          ? `"${new Date(s.lastSubmittedAt).toLocaleString('id-ID')}"`
+          : '"-"',
+      ])
+      const csvContent =
+        '\uFEFF' + [headers.join(','), ...csvRows.map((e) => e.join(','))].join('\n')
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `rekap-siswa-${selectedClass}-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      return
+    }
+
     const headers = ['No Absen', 'Nama', 'Kelas', 'Email', 'Rata-Rata (Skala 4.0)', 'Waktu Isi']
-    const csvRows = filteredRows.map((r) => [
+    const csvRows = filteredRawRows.map((r) => [
       r.no_absen || '-',
       `"${(r.nama || '').replace(/"/g, '""')}"`,
       normalizeClassName(r.kelas) || '-',
@@ -166,7 +368,7 @@ export default function AdminDatabasePage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `rekap-survey-${selectedClass}-${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `log-survey-${selectedClass}-${new Date().toISOString().slice(0, 10)}.csv`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -175,7 +377,7 @@ export default function AdminDatabasePage() {
 
   return (
     <div className="space-y-5 font-sans text-[#090D16]">
-      {/* Banner Header Indigo - Ungu - Biru Langit */}
+      {/* Banner Header */}
       <div className="rounded-3xl bg-gradient-to-r from-indigo-950 via-indigo-800 to-sky-700 text-white p-6 sm:p-7 shadow-xl border border-indigo-400/20 flex flex-wrap items-center justify-between gap-4 relative overflow-hidden">
         <Sparkles
           size={130}
@@ -185,25 +387,25 @@ export default function AdminDatabasePage() {
         <div className="relative z-10">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 border border-white/20 text-[11px] font-extrabold text-sky-200 mb-2">
             <Database size={12} />
-            <span>REKAPITULASI PER KELAS • SMAN 5 SEMARANG</span>
+            <span>REKAPITULASI &amp; FREKUENSI MENGISI • SMAN 5 SEMARANG</span>
           </div>
           <h1 className="font-heading text-xl sm:text-2xl font-black text-white">
             Database Hasil Survey 7 KAIH
           </h1>
           <p className="text-xs sm:text-sm text-indigo-100 font-medium mt-1">
-            Menampilkan{' '}
+            Terpantau{' '}
             <strong className="text-white">
-              {filteredRows.length.toLocaleString('id-ID')} responden
+              {classSummaryStats.filled.toLocaleString('id-ID')} siswa
             </strong>{' '}
-            terfilter dari{' '}
+            sudah mengisi dari{' '}
             <strong className="text-sky-200">
               {rows.length.toLocaleString('id-ID')} total rekapan
             </strong>{' '}
-            Supabase.
+            masuk.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 relative z-10">
+        <div className="flex flex-wrap items-center gap-2.5 relative z-10">
           <button
             type="button"
             onClick={fetchResponses}
@@ -216,7 +418,11 @@ export default function AdminDatabasePage() {
           <button
             type="button"
             onClick={handleExportCSV}
-            disabled={filteredRows.length === 0}
+            disabled={
+              viewMode === 'MERGED'
+                ? filteredMergedStudents.length === 0
+                : filteredRawRows.length === 0
+            }
             className="px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
           >
             <Download size={14} />
@@ -240,18 +446,22 @@ export default function AdminDatabasePage() {
               />
               <select
                 value={selectedClass}
-                onChange={(e) => setSelectedClass(e.target.value)}
+                onChange={(e) => {
+                  setSelectedClass(e.target.value)
+                  setStatusFilter('ALL')
+                  setExpandedStudentKey(null)
+                }}
                 className="w-full pl-9 pr-4 py-2.5 rounded-2xl border border-slate-300 bg-white/95 text-sm font-bold text-[#090D16] focus:outline-none focus:ring-2 focus:ring-indigo-600"
               >
                 <option value="ALL">
-                  Semua Kelas ({rows.length.toLocaleString('id-ID')} Data)
+                  Semua Kelas ({rows.length.toLocaleString('id-ID')} Rekapan)
                 </option>
                 <optgroup label="Kelas X">
                   {availableClasses
                     .filter((c) => c.startsWith('X-'))
                     .map((c) => (
                       <option key={c} value={c}>
-                        Kelas {c} ({countByClass[c] || 0} Siswa)
+                        Kelas {c} ({uniqueFilledCountByClass[c] || 0}/{TOTAL_ABSEN_PER_KELAS} Siswa)
                       </option>
                     ))}
                 </optgroup>
@@ -260,7 +470,7 @@ export default function AdminDatabasePage() {
                     .filter((c) => c.startsWith('XI-'))
                     .map((c) => (
                       <option key={c} value={c}>
-                        Kelas {c} ({countByClass[c] || 0} Siswa)
+                        Kelas {c} ({uniqueFilledCountByClass[c] || 0}/{TOTAL_ABSEN_PER_KELAS} Siswa)
                       </option>
                     ))}
                 </optgroup>
@@ -269,7 +479,7 @@ export default function AdminDatabasePage() {
                     .filter((c) => c.startsWith('XII-'))
                     .map((c) => (
                       <option key={c} value={c}>
-                        Kelas {c} ({countByClass[c] || 0} Siswa)
+                        Kelas {c} ({uniqueFilledCountByClass[c] || 0}/{TOTAL_ABSEN_PER_KELAS} Siswa)
                       </option>
                     ))}
                 </optgroup>
@@ -316,13 +526,15 @@ export default function AdminDatabasePage() {
                 />
               </div>
 
-              {(selectedClass !== 'ALL' || selectedDate || searchTerm) && (
+              {(selectedClass !== 'ALL' || selectedDate || searchTerm || statusFilter !== 'ALL') && (
                 <button
                   type="button"
                   onClick={() => {
                     setSelectedClass('ALL')
                     setSelectedDate('')
                     setSearchTerm('')
+                    setStatusFilter('ALL')
+                    setExpandedStudentKey(null)
                   }}
                   className="px-3.5 py-2.5 rounded-2xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-extrabold flex items-center gap-1 shrink-0 cursor-pointer"
                 >
@@ -341,7 +553,10 @@ export default function AdminDatabasePage() {
           </span>
           <button
             type="button"
-            onClick={() => setSelectedClass('ALL')}
+            onClick={() => {
+              setSelectedClass('ALL')
+              setStatusFilter('ALL')
+            }}
             className={`px-3 py-1.5 rounded-xl text-xs font-extrabold shrink-0 cursor-pointer transition-all ${
               selectedClass === 'ALL'
                 ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-xs'
@@ -351,65 +566,310 @@ export default function AdminDatabasePage() {
             Semua ({rows.length.toLocaleString('id-ID')})
           </button>
           {availableClasses.map((cls) => {
-            const count = countByClass[cls] || 0
+            const filledCount = uniqueFilledCountByClass[cls] || 0
             const active = selectedClass === cls
             return (
               <button
                 key={cls}
                 type="button"
-                onClick={() => setSelectedClass(cls)}
+                onClick={() => {
+                  setSelectedClass(cls)
+                  setStatusFilter('ALL')
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-extrabold shrink-0 transition-colors cursor-pointer ${
                   active
                     ? 'bg-gradient-to-r from-indigo-600 to-sky-600 text-white shadow-xs'
-                    : count > 0
+                    : filledCount > 0
                     ? 'bg-indigo-100/90 text-indigo-900 hover:bg-indigo-200/80'
                     : 'bg-white/75 text-slate-700 hover:bg-white'
                 }`}
               >
-                {cls} ({count})
+                {cls} ({filledCount}/{TOTAL_ABSEN_PER_KELAS})
               </button>
             )
           })}
         </div>
       </div>
 
-      {/* Tabel Daftar Nama Siswa */}
+      {/* Bar Kontrol Mode Tampilan & Status Pengisian */}
+      <div className="kaih-glass-card p-4 rounded-3xl flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 bg-slate-200/70 p-1 rounded-2xl">
+          <button
+            type="button"
+            onClick={() => setViewMode('MERGED')}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+              viewMode === 'MERGED'
+                ? 'bg-indigo-950 text-white shadow-xs'
+                : 'text-slate-700 hover:text-slate-950'
+            }`}
+          >
+            <Layers size={14} />
+            <span>Rekap Per Siswa (Gabungan)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setViewMode('RAW')}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+              viewMode === 'RAW'
+                ? 'bg-indigo-950 text-white shadow-xs'
+                : 'text-slate-700 hover:text-slate-950'
+            }`}
+          >
+            <List size={14} />
+            <span>Semua Log Kiriman ({filteredRawRows.length})</span>
+          </button>
+        </div>
+
+        {viewMode === 'MERGED' && selectedClass !== 'ALL' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('ALL')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer transition-all ${
+                statusFilter === 'ALL'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white/80 text-slate-700 hover:bg-white'
+              }`}
+            >
+              Semua Absen ({classSummaryStats.total})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('FILLED')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer transition-all ${
+                statusFilter === 'FILLED'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'
+              }`}
+            >
+              <CheckCircle2 size={13} />
+              <span>Sudah Mengisi ({classSummaryStats.filled})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('UNFILLED')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer transition-all ${
+                statusFilter === 'UNFILLED'
+                  ? 'bg-rose-600 text-white'
+                  : 'bg-rose-100 text-rose-900 hover:bg-rose-200'
+              }`}
+            >
+              <Clock size={13} />
+              <span>Belum Mengisi ({classSummaryStats.unfilled})</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Tabel Daftar Siswa */}
       <div className="kaih-glass-card rounded-3xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-300/60 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-slate-300/60 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Users size={18} className="text-indigo-700" />
             <h2 className="font-heading text-sm sm:text-base font-extrabold text-[#090D16]">
-              {selectedClass === 'ALL'
-                ? `Seluruh Kelas (${filteredRows.length.toLocaleString('id-ID')} Data)`
-                : `Daftar Siswa Kelas ${selectedClass} (${filteredRows.length.toLocaleString('id-ID')} Data)`}
+              {viewMode === 'MERGED'
+                ? selectedClass === 'ALL'
+                  ? `Rekap Gabungan Per Siswa (${filteredMergedStudents.length.toLocaleString('id-ID')} Siswa)`
+                  : `Pemantauan Absen 1–${classSummaryStats.total} Kelas ${selectedClass}`
+                : `Log Pengisian Survei (${filteredRawRows.length.toLocaleString('id-ID')} Entri)`}
             </h2>
           </div>
           <span className="text-[11px] font-extrabold text-slate-800">
-            Urut Kelas & No. Absen
+            Urut Kelas &amp; No. Absen
           </span>
         </div>
 
         {loading ? (
           <div className="p-10 text-center text-sm font-bold text-slate-800 animate-pulse">
-            Memuat seluruh data survei dari Supabase...
+            Memuat dan menggabungkan data survei siswa...
           </div>
-        ) : filteredRows.length === 0 ? (
-          <div className="p-10 text-center text-sm font-bold text-slate-800">
-            Tidak ada data survey yang cocok untuk filter saat ini. Klik tombol{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedClass('ALL')
-                setSelectedDate('')
-                setSearchTerm('')
-              }}
-              className="text-indigo-700 underline font-extrabold cursor-pointer"
-            >
-              Reset Filter
-            </button>{' '}
-            untuk menampilkan seluruh siswa.
-          </div>
+        ) : viewMode === 'MERGED' ? (
+          filteredMergedStudents.length === 0 ? (
+            <div className="p-10 text-center text-sm font-bold text-slate-800">
+              Tidak ada data siswa yang cocok dengan filter saat ini.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-indigo-950/5 border-b border-slate-300/70 text-[11px] font-extrabold uppercase text-[#090D16]">
+                    <th className="py-3.5 px-4">Absen</th>
+                    <th className="py-3.5 px-4">Nama Siswa</th>
+                    <th className="py-3.5 px-4">Kelas</th>
+                    <th className="py-3.5 px-4">Frekuensi Mengisi</th>
+                    <th className="py-3.5 px-4">Rata-Rata Gabungan</th>
+                    <th className="py-3.5 px-4">Terakhir Mengisi</th>
+                    <th className="py-3.5 px-4 text-right">Detail</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 text-xs sm:text-sm bg-white/85">
+                  {filteredMergedStudents.map((student) => {
+                    const isFilled = student.fillCount > 0
+                    const isExpanded = expandedStudentKey === student.key
+
+                    return (
+                      <Fragment key={student.key}>
+                        <tr
+                          className={`transition-colors ${
+                            isFilled
+                              ? 'hover:bg-indigo-50/75'
+                              : 'bg-rose-50/40 hover:bg-rose-50/75 text-slate-600'
+                          }`}
+                        >
+                          <td className="py-3.5 px-4 font-black text-[#090D16]">
+                            {student.no_absen ?? '-'}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <p
+                              className={`font-extrabold ${
+                                isFilled ? 'text-[#090D16]' : 'text-rose-800 italic'
+                              }`}
+                            >
+                              {student.nama}
+                            </p>
+                            {isFilled && student.email !== '-' && (
+                              <p className="text-[11px] text-slate-500 font-medium">
+                                {student.email}
+                              </p>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <span className="px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-900 text-xs font-extrabold">
+                              {student.kelas}
+                            </span>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            {student.fillCount === 0 ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 text-xs font-extrabold">
+                                <Clock size={12} />
+                                <span>Belum Mengisi (0x)</span>
+                              </span>
+                            ) : student.fillCount >= 3 ? (
+                              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 text-xs font-black">
+                                <CheckCircle2 size={13} />
+                                <span>Rajin • Telah Mengisi {student.fillCount}x</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-sky-100 text-sky-900 text-xs font-extrabold">
+                                <CheckCircle2 size={13} />
+                                <span>Telah Mengisi {student.fillCount}x</span>
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            {isFilled ? (
+                              <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 font-black text-xs">
+                                {student.combinedAverage.toFixed(2)} / 4.0
+                              </span>
+                            ) : (
+                              <span className="text-xs font-bold text-slate-400">-</span>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4 text-slate-800 font-medium text-xs">
+                            {student.lastSubmittedAt
+                              ? new Date(student.lastSubmittedAt).toLocaleString('id-ID', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : '-'}
+                          </td>
+
+                          <td className="py-3.5 px-4 text-right">
+                            {isFilled ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedStudentKey(isExpanded ? null : student.key)
+                                }
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-xs font-extrabold cursor-pointer transition-all"
+                              >
+                                <span>Riwayat ({student.fillCount}x)</span>
+                                {isExpanded ? (
+                                  <ChevronUp size={14} />
+                                ) : (
+                                  <ChevronDown size={14} />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="text-[11px] font-bold text-slate-400">
+                                Kosong
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+
+                        {/* Baris Rincian Riwayat Pengisian Siswa */}
+                        {isFilled && isExpanded && (
+                          <tr className="bg-indigo-50/60">
+                            <td colSpan={7} className="px-6 py-4">
+                              <div className="rounded-2xl bg-white border border-indigo-200/80 p-4 space-y-2.5 shadow-2xs">
+                                <p className="text-xs font-black text-indigo-950">
+                                  Rincian {student.fillCount} Kali Pengisian — {student.nama} (
+                                  {student.kelas} • Absen {student.no_absen ?? '-'})
+                                </p>
+
+                                <div className="divide-y divide-slate-100">
+                                  {student.submissions.map((sub, idx) => (
+                                    <div
+                                      key={sub.id}
+                                      className="py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-900 font-black">
+                                          Pengisian #{student.submissions.length - idx}
+                                        </span>
+                                        <span className="font-bold text-slate-700">
+                                          {new Date(sub.created_at).toLocaleString('id-ID', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                          })}
+                                        </span>
+                                        <span className="text-slate-500">({sub.email})</span>
+                                      </div>
+
+                                      <div className="flex items-center gap-3">
+                                        <span className="px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 font-black">
+                                          Skor: {getRowAverage(sub).toFixed(2)} / 4.0
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteRow(sub.id, sub.nama)}
+                                          className="p-1.5 rounded-lg text-rose-700 hover:bg-rose-100 cursor-pointer"
+                                          title="Hapus pengisian ini"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
         ) : (
+          /* Mode Log Mentah (Semua Kiriman Terpisah) */
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -424,7 +884,7 @@ export default function AdminDatabasePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/80 text-xs sm:text-sm bg-white/85">
-                {filteredRows.map((r) => {
+                {filteredRawRows.map((r) => {
                   const avg = getRowAverage(r)
                   return (
                     <tr key={r.id} className="hover:bg-indigo-50/75 transition-colors">
