@@ -19,8 +19,8 @@ type HomeConfig = {
   hero_media_url: string | null
 }
 
-function sanitizeBerandaTitle(rawTitle?: string | null): string {
-  const clean = (rawTitle || '').trim()
+function getBerandaTitle(raw?: string | null): string {
+  const clean = (raw || '').trim()
   if (!clean || clean.toLowerCase() === 'nexara') {
     return 'Dashboard 7KAIH'
   }
@@ -41,14 +41,14 @@ export default function HeroSection() {
   const fetchHeroConfig = useCallback(async () => {
     const { data, error } = await supabase
       .from('home_config')
-      .select('*')
+      .select('hero_title, hero_subtitle, logo_url, poster_url, hero_media_url')
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
     if (!error && data) {
       setConfig({
-        hero_title: sanitizeBerandaTitle(data.hero_title),
+        hero_title: getBerandaTitle(data.hero_title),
         hero_subtitle:
           data.hero_subtitle && data.hero_subtitle.toLowerCase() !== 'nexara'
             ? data.hero_subtitle
@@ -77,86 +77,70 @@ export default function HeroSection() {
     }
   }, [fetchHeroConfig, supabase])
 
-  const rightHeroImage = config.hero_media_url || config.poster_url
+  const watermarkLogo = config.logo_url || config.hero_media_url
   const showSeparatePosterCard = Boolean(config.poster_url)
 
   return (
     <div className="space-y-5">
-      {/* === HERO BANNER UTAMA === */}
-      <section className="rounded-[2rem] bg-gradient-to-br from-indigo-950 via-indigo-900 to-sky-800 text-white p-6 sm:p-9 lg:p-10 shadow-2xl relative overflow-hidden">
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-7 items-center">
-          {/* Kolom Kiri: Logo Tanpa Kotak Latar & Teks Ringkas */}
-          <div className={`${rightHeroImage ? 'lg:col-span-7' : 'lg:col-span-12'} space-y-4`}>
-            <div className="flex items-center gap-3.5">
-              {config.logo_url && (
-                <img
-                  src={config.logo_url}
-                  alt="Logo SMAN 5 Semarang"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                  }}
-                  className="h-14 w-14 sm:h-16 sm:w-16 object-contain bg-transparent shrink-0"
-                />
-              )}
+      {/* === HERO BANNER UTAMA DENGAN LOGO SMALA DI LATAR BELAKANG === */}
+      <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-indigo-950 via-blue-950 to-slate-900 text-white p-7 sm:p-10 lg:p-12 shadow-xl">
+        {/* Logo SMALA sebagai Watermark Latar Belakang Banner */}
+        {watermarkLogo && (
+          <img
+            src={watermarkLogo}
+            alt=""
+            aria-hidden="true"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+            className="pointer-events-none select-none absolute right-2 sm:right-8 top-1/2 -translate-y-1/2 w-56 h-56 sm:w-72 sm:h-72 lg:w-80 lg:h-80 object-contain opacity-[0.18]"
+          />
+        )}
 
-              <p className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-amber-300">
-                SMAN 5 Semarang
-              </p>
-            </div>
+        {/* Konten Utama Beranda */}
+        <div className="relative z-10 max-w-2xl space-y-4">
+          <p className="text-xs sm:text-sm font-bold uppercase tracking-widest text-amber-300">
+            SMAN 5 Semarang
+          </p>
 
-            <h1 className="font-heading text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-white leading-tight">
-              {config.hero_title}
-            </h1>
+          <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
+            {config.hero_title}
+          </h1>
 
-            <p className="text-sm sm:text-base text-indigo-100/90 font-medium leading-relaxed max-w-xl">
-              {config.hero_subtitle}
-            </p>
+          <p className="text-sm sm:text-base text-indigo-100/90 leading-relaxed">
+            {config.hero_subtitle}
+          </p>
 
-            <div className="flex flex-wrap items-center gap-2.5 pt-2">
-              <Link
-                href="/survey"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-sky-400 to-emerald-400 hover:opacity-95 text-indigo-950 text-xs sm:text-sm font-black shadow-lg transition-all"
-              >
-                <ClipboardList size={16} />
-                <span>Isi Survei</span>
-                <ArrowRight size={15} />
-              </Link>
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <Link
+              href="/survey"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs sm:text-sm font-extrabold shadow-md transition-all"
+            >
+              <ClipboardList size={16} />
+              <span>Isi Survei</span>
+              <ArrowRight size={15} />
+            </Link>
 
-              <Link
-                href="/statistik"
-                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-white/15 hover:bg-white/25 text-white text-xs sm:text-sm font-extrabold transition-all"
-              >
-                <PieChart size={16} className="text-sky-300" />
-                <span>Statistik Saya</span>
-              </Link>
+            <Link
+              href="/statistik"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-white/12 hover:bg-white/20 text-white text-xs sm:text-sm font-bold transition-all"
+            >
+              <PieChart size={16} className="text-sky-300" />
+              <span>Statistik Saya</span>
+            </Link>
 
-              <Link
-                href="/game"
-                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-white/15 hover:bg-white/25 text-white text-xs sm:text-sm font-extrabold transition-all"
-              >
-                <Gamepad2 size={16} className="text-amber-300" />
-                <span>Kuis XP</span>
-              </Link>
-            </div>
+            <Link
+              href="/game"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-white/12 hover:bg-white/20 text-white text-xs sm:text-sm font-bold transition-all"
+            >
+              <Gamepad2 size={16} className="text-amber-300" />
+              <span>Kuis XP</span>
+            </Link>
           </div>
-
-          {/* Kolom Kanan: Logo / Gambar Utama Tanpa Kotak Latar Belakang */}
-          {rightHeroImage && (
-            <div className="lg:col-span-5 flex items-center justify-center">
-              <img
-                src={rightHeroImage}
-                alt="Logo SMAN 5 Semarang"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none'
-                }}
-                className="w-52 h-52 sm:w-64 sm:h-64 object-contain bg-transparent drop-shadow-lg"
-              />
-            </div>
-          )}
         </div>
       </section>
 
-      {/* === KARTU POSTER INFOGRAFIS 7 KAIH === */}
+      {/* === KARTU POSTER INFOGRAFIS 7 KAIH (JIKA DIUNGGAH ADMIN) === */}
       {showSeparatePosterCard && config.poster_url && (
         <section className="kaih-glass-card p-5 sm:p-6 rounded-3xl space-y-3">
           <div className="flex items-center justify-between">
